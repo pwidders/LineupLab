@@ -508,3 +508,35 @@ def build_multiple_lineups(
         return pd.DataFrame()
 
     return pd.concat(lineups, ignore_index=True)
+
+    def late_swap_optimizer(
+        hitters,
+        pitchers,
+        stacks,
+        current_players,
+        unavailable_players,
+    ):
+        """
+        Attempt to preserve today's lineup while replacing scratched players.
+        """
+
+        unavailable = {
+            p.strip()
+            for p in unavailable_players
+            if str(p).strip()
+        }
+
+        locked_players = [
+            p for p in current_players
+            if p not in unavailable
+        ]
+
+        lineup, salary, score = build_real_optimizer_lineup(
+            hitters,
+            pitchers,
+            stacks,
+            locked_players=locked_players,
+            excluded_players=unavailable_players,
+        )
+
+        return lineup, salary, score

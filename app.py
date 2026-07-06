@@ -7,6 +7,7 @@ from model import (
     build_stacks,
     build_real_optimizer_lineup,
     build_multiple_lineups,
+    late_swap_optimizer,
 )
 from lineup_manager import (
     save_lineup,
@@ -285,36 +286,23 @@ if uploaded_file:
                     st.warning("Scratched/unavailable from current lineup: " + ", ".join(scratched_from_lineup))
 
                 if st.button("🔄 Late Swap Rebuild"):
-                    lineup, salary, score = build_real_optimizer_lineup(
+                    lineup, salary, score = late_swap_optimizer(
                         hitters_live,
                         pitchers_live,
                         stacks_live,
-                        locked_players=kept_players,
-                        excluded_players=combined_excluded_players,
-                        primary_stack=primary_stack,
-                        secondary_stack=secondary_stack,
-                        min_salary=0,
+                        current_players,
+                        combined_excluded_players,
                     )
 
-                    if lineup.empty:
-                        st.error(
-                            "Strict late swap failed. Try removing one more locked player or lowering constraints."
-                        )
-                    else:
-                        new_players = lineup["Player"].dropna().astype(str).tolist()
+                if lineup.empty:
+                    st.error("No valid late swap found. Try unlocking one more player or relaxing constraints.")
+                else:
+                    st.success("Late swap completed ✅")
 
-                        removed = [p for p in current_players if p not in new_players]
-                        added = [p for p in new_players if p not in current_players]
-                        kept = [p for p in current_players if p in new_players]
+                    render_lineup(lineup, salary, score)
 
-                        render_lineup(lineup, salary, score)
-
-                        st.markdown("### Change Summary")
-                        st.write(f"Kept: **{len(kept)}/10**")
-                        st.write("Removed: " + (", ".join(removed) if removed else "None"))
-                        st.write("Added: " + (", ".join(added) if added else "None"))
-
-                        st.session_state["current_lineup"] = lineup.copy()
+                    st.session_state["current_lineup"] = lineup.copy()
+                    save_lineup(lineup, salary, score)
 
             else:
                 st.info("Build a lineup first or paste your current DK lineup to use Late Swap.")
