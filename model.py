@@ -516,25 +516,67 @@ def late_swap_optimizer(
     current_players,
     unavailable_players,
 ):
+    """
+    Late swap optimizer that tries to preserve as much of the current lineup as possible.
+    First locks all available current players.
+    If no valid lineup is found, gradually unlocks the weakest saved players.
+    """
+
     unavailable = {
         str(p).strip()
         for p in unavailable_players
         if str(p).strip()
     }
 
-    locked_players = [
+    available_current_players = [
         str(p).strip()
         for p in current_players
         if str(p).strip() and str(p).strip() not in unavailable
     ]
 
-    lineup, salary, score = build_real_optimizer_lineup(
-        hitters,
-        pitchers,
-        stacks,
-        locked_players=locked_players,
-        excluded_players=list(unavailable),
-        min_salary=0,
-    )
+    # Combine hitters + pitchers so we can rank current players by Score
+    player_pool = pd.concat([hitters, pitchers], ignore_index=True).copy()
 
-    return lineup, salary, score
+    if "Player" not in player_pool.columns and "Players" in player_pool.columns:
+        player_pool["Player"] = player_pool["Players"]
+
+    if "Score" not in player_pool.columns:
+        if "Overall" in player_pool.columns:
+            player_pool["Score"] = player_pool["Overall"]
+        elif "Projection" in player_pool.columns:
+            player_pool["Score"] = player_pool["Projection"]
+        else:
+            player_pool["Score"] = 0
+
+    current_pool = player_pool[
+        player_pool["Player"].astype(str).str.strip().isin(available_current_players)
+    ].copy()
+
+    current_pool = current_pool.sort_values("Score", ascending=True)
+
+    # Try keeping 9, then 8, then 7, etc.
+    for unlock_count in range(0, len(available_current_players) + 1):
+        players_to_unlock = (
+            current_pool.head(unlock_count)["Player"].astype(str).tolist()
+            if unlock_count > 0
+            else []
+        )
+
+        locked_players = [
+            p for p in available_current_players
+            if p not in players_to_unlock
+        ]
+
+        lineup, salary, score = build_real_optimizer_lineup(
+            hitters,
+            pitchers,
+            stacks,
+            locked_players=locked_players,
+            excluded_players=list(unavailable),
+            min_salary=0,
+        )
+
+        if not lineup.empty:
+            return lineup, salary, score
+
+    return pd.DataFrame(), 0, 0
