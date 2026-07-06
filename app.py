@@ -122,16 +122,29 @@ if uploaded_file:
             help="Removes all hitters and pitchers from selected weather-risk teams.",
         )
 
-        unavailable_text = st.text_area(
-            "IL / bench / scratched players",
-            placeholder="Paste one player per line",
+        st.write("### IL / Bench / Scratched")
+
+        unavailable_players = st.multiselect(
+            "Select unavailable players",
+            options=all_players,
+            help="Tap players to remove them from the player pool.",
         )
 
-        unavailable_players = [
-            p.strip()
-            for p in unavailable_text.splitlines()
-            if p.strip()
-        ]
+        with st.expander("Or paste player names (desktop)"):
+            unavailable_text = st.text_area(
+                "Paste one player per line",
+                placeholder="One player per line",
+            )
+
+            unavailable_players.extend(
+                [
+                    p.strip()
+                    for p in unavailable_text.splitlines()
+                    if p.strip()
+                ]
+            )
+
+        unavailable_players = sorted(set(unavailable_players))
 
         weather_excluded_players = []
 

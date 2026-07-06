@@ -76,12 +76,21 @@ def render_late_swap_assistant(
         )
 
     if st.button("🔄 Late Swap Rebuild"):
+        late_swap_salary_floor = st.number_input(
+            "Minimum salary after late swap",
+            min_value=0,
+            max_value=50000,
+            value=49000,
+            step=100,
+        )
+
         lineup, salary, score = late_swap_optimizer(
             hitters_live,
             pitchers_live,
             stacks_live,
             current_players,
             combined_excluded_players,
+            min_salary=late_swap_salary_floor,
         )
 
         if lineup.empty:

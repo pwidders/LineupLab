@@ -515,6 +515,7 @@ def late_swap_optimizer(
     stacks,
     current_players,
     unavailable_players,
+    min_salary=49000,
 ):
     """
     Late swap optimizer that tries to preserve as much of the current lineup as possible.
@@ -573,7 +574,7 @@ def late_swap_optimizer(
             stacks,
             locked_players=locked_players,
             excluded_players=list(unavailable),
-            min_salary=0,
+            min_salary=min_salary,
         )
 
         if not lineup.empty:
