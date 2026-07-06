@@ -34,6 +34,24 @@ def render_lineup(lineup, salary, score):
     )
     st.code(lineup_text, language="text")
 
+def render_slate_control_center(hitters_live, pitchers_live, stacks_live, combined_excluded_players, weather_risk_teams):
+    top_stack = stacks_live.iloc[0]["Team"] if not stacks_live.empty else "N/A"
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Active Hitters", len(hitters_live))
+    col2.metric("Active Pitchers", len(pitchers_live))
+    col3.metric("Excluded Players", len(combined_excluded_players))
+    col4.metric("Weather Teams", len(weather_risk_teams))
+
+    st.markdown(
+        f"""
+        ### Slate Status
+        - 🔥 **Top Stack:** {top_stack}
+        - 🌧 **Weather-risk teams removed:** {", ".join(weather_risk_teams) if weather_risk_teams else "None"}
+        - 🚑 **Unavailable / excluded players:** {len(combined_excluded_players)}
+        """
+    )
 
 def filter_unavailable(df, unavailable_players):
     unavailable_set = {str(p).strip() for p in unavailable_players if str(p).strip()}
@@ -141,11 +159,12 @@ if uploaded_file:
         pitchers_live = filter_unavailable(pitchers, combined_excluded_players)
         stacks_live = build_stacks(hitters_live)
 
-        st.info(
-            f"Active hitters: {len(hitters_live)} | "
-            f"Active pitchers: {len(pitchers_live)} | "
-            f"Unavailable/excluded: {len(combined_excluded_players)} | "
-            f"Weather-risk teams: {len(weather_risk_teams)}"
+        render_slate_control_center(
+            hitters_live,
+            pitchers_live,
+            stacks_live,
+            combined_excluded_players,
+            weather_risk_teams,
         )
 
         if stacks_live.empty:
