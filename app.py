@@ -41,10 +41,14 @@ if uploaded_file and st.sidebar.button("💾 Save Uploaded Sheet"):
 if st.sidebar.button("📲 Load Latest Saved Sheet"):
     try:
         saved_bytes = load_projection_file()
-        uploaded_file = BytesIO(saved_bytes)
+        st.session_state["saved_projection_bytes"] = saved_bytes
         st.sidebar.success("Loaded latest saved sheet.")
     except Exception as e:
         st.sidebar.error(f"Load failed: {e}")
+
+if uploaded_file is None and "saved_projection_bytes" in st.session_state:
+    uploaded_file = BytesIO(st.session_state["saved_projection_bytes"])
+    uploaded_file.name = "latest_projection_sheet.xlsx"
 
 
 def filter_unavailable(df, unavailable_players):
