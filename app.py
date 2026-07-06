@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 
 from data_loader import load_excel
 from model import (
@@ -12,8 +11,9 @@ from model import (
 
 DK_SALARY_CAP = 50000
 
-st.set_page_config(page_title="MLB DFS Tool", layout="wide")
-st.title("MLB DFS Tool")
+st.set_page_config(page_title="LineupLab", layout="wide")
+st.title("⚾ LineupLab")
+st.caption("MLB DFS Optimizer")
 
 uploaded_file = st.file_uploader("Upload your Excel sheet", type=["xlsx", "xlsm"])
 
@@ -44,6 +44,30 @@ def filter_unavailable(df, unavailable_players):
     return df[
         ~df["Players"].astype(str).str.strip().isin(unavailable_set)
     ].copy()
+
+
+def parse_pasted_lineup(text):
+    players = []
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        if " - " in line:
+            name = line.split(" - ", 1)[1]
+        elif "—" in line:
+            name = line.split("—", 1)[1]
+        else:
+            name = line
+
+        name = name.split("(")[0].strip()
+        name = name.split("|")[0].strip()
+
+        if name:
+            players.append(name)
+
+    return players
 
 
 if uploaded_file:
@@ -109,16 +133,12 @@ if uploaded_file:
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                primary_stack = st.selectbox(
-                    "Primary stack",
-                    options=stack_options,
-                    index=0,
-                )
+                primary_stack = st.selectbox("Primary stack", stack_options, index=0)
 
             with col2:
                 secondary_stack = st.selectbox(
                     "Secondary stack",
-                    options=stack_options,
+                    stack_options,
                     index=1 if len(stack_options) > 1 else 0,
                 )
 
@@ -156,7 +176,84 @@ if uploaded_file:
                         "No optimized lineup found. Try lowering minimum salary, changing stacks, or relaxing locks/excludes."
                     )
                 else:
+                    st.session_state["current_lineup"] = lineup.copy()
                     render_lineup(lineup, salary, score)
+                    st.success("Lineup saved for Late Swap ✅")
+
+            st.divider()
+
+            st.subheader("Late Swap Assistant")
+
+            pasted_lineup = st.text_area(
+                "Optional: paste current DK lineup here",
+                placeholder="P - Player Name\nP - Player Name\nC - Player Name...",
+            )
+
+            if pasted_lineup.strip():
+                current_players = parse_pasted_lineup(pasted_lineup)
+            elif "current_lineup" in st.session_state:
+                current_players = (
+                    st.session_state["current_lineup"]["Player"]
+                    .dropna()
+                    .astype(str)
+                    .tolist()
+                )
+            else:
+                current_players = []
+
+            if current_players:
+                st.write(f"Current lineup detected: **{len(current_players)} players**")
+
+                unavailable_set = set(unavailable_players)
+                kept_players = [
+                    p for p in current_players
+                    if p not in unavailable_set
+                ]
+                scratched_from_lineup = [
+                    p for p in current_players
+                    if p in unavailable_set
+                ]
+
+                st.write(f"Keeping: **{len(kept_players)}**")
+                st.write(f"Replacing: **{len(scratched_from_lineup)}**")
+
+                if scratched_from_lineup:
+                    st.warning("Scratched/unavailable from current lineup: " + ", ".join(scratched_from_lineup))
+
+                if st.button("🔄 Late Swap Rebuild"):
+                    lineup, salary, score = build_real_optimizer_lineup(
+                        hitters_live,
+                        pitchers_live,
+                        stacks_live,
+                        locked_players=kept_players,
+                        excluded_players=combined_excluded_players,
+                        primary_stack=primary_stack,
+                        secondary_stack=secondary_stack,
+                        min_salary=0,
+                    )
+
+                    if lineup.empty:
+                        st.error(
+                            "Strict late swap failed. Try removing one more locked player or lowering constraints."
+                        )
+                    else:
+                        new_players = lineup["Player"].dropna().astype(str).tolist()
+
+                        removed = [p for p in current_players if p not in new_players]
+                        added = [p for p in new_players if p not in current_players]
+                        kept = [p for p in current_players if p in new_players]
+
+                        render_lineup(lineup, salary, score)
+
+                        st.markdown("### Change Summary")
+                        st.write(f"Kept: **{len(kept)}/10**")
+                        st.write("Removed: " + (", ".join(removed) if removed else "None"))
+                        st.write("Added: " + (", ".join(added) if added else "None"))
+
+                        st.session_state["current_lineup"] = lineup.copy()
+
+            else:
+                st.info("Build a lineup first or paste your current DK lineup to use Late Swap.")
 
             st.divider()
 
@@ -180,17 +277,12 @@ if uploaded_file:
                 else:
                     for lineup_num, lineup_df in multi.groupby("Lineup #"):
                         st.subheader(f"Lineup {lineup_num}")
-                        lineup_clean = lineup_df.drop(
-                            columns=["Lineup #"],
-                            errors="ignore",
-                        )
+                        lineup_clean = lineup_df.drop(columns=["Lineup #"], errors="ignore")
                         salary = lineup_clean["Salary"].sum()
                         score = lineup_clean["Score"].sum()
                         render_lineup(lineup_clean, salary, score)
                         st.divider()
 
-    # Use filtered pools if Lineup Builder has initialized them;
-    # otherwise show full raw-rated pools.
     if "hitters_live" not in locals():
         hitters_live = hitters
     if "pitchers_live" not in locals():
@@ -200,9 +292,7 @@ if uploaded_file:
 
     with tab_pitchers:
         st.subheader("Pitchers")
-
         sorted_pitchers = pitchers_live.sort_values("Overall", ascending=False)
-
         st.write("Top Pitchers")
         st.dataframe(sorted_pitchers.head(10), use_container_width=True)
 
@@ -211,9 +301,7 @@ if uploaded_file:
 
     with tab_hitters:
         st.subheader("Hitters")
-
         sorted_hitters = hitters_live.sort_values("Overall", ascending=False)
-
         st.write("Top Hitters")
         st.dataframe(sorted_hitters.head(15), use_container_width=True)
 
@@ -222,7 +310,6 @@ if uploaded_file:
 
     with tab_stacks:
         st.subheader("Live Recalculated Stacks")
-
         st.write("Top Live Stacks")
         st.dataframe(stacks_live.head(10), use_container_width=True)
 
