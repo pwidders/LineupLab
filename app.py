@@ -7,15 +7,17 @@ from model import (
     build_stacks,
     build_real_optimizer_lineup,
     build_multiple_lineups,
-    late_swap_optimizer,
 )
 from lineup_manager import (
     save_lineup,
     has_saved_lineup,
     get_saved_lineup,
     clear_saved_lineup,
-    get_saved_player_names,
 )
+from render import render_lineup
+from slate_dashboard import render_slate_control_center
+from late_swap import render_late_swap_assistant
+
 
 DK_SALARY_CAP = 50000
 
@@ -25,41 +27,6 @@ st.caption("MLB DFS Optimizer")
 
 uploaded_file = st.file_uploader("Upload your Excel sheet", type=["xlsx", "xlsm"])
 
-
-def render_lineup(lineup, salary, score):
-    st.markdown(
-        f"### 💰 ${salary:,.0f} | 🔮 {round(score,1)} pts | 💵 ${DK_SALARY_CAP - salary:,.0f} left"
-    )
-
-    for _, row in lineup.iterrows():
-        st.write(
-            f"**{row['Slot']}** — {row['Player']} ({row['Team']}) | "
-            f"${int(row['Salary'])} | {round(row['Score'],1)} pts"
-        )
-
-    lineup_text = "\n".join(
-        f"{row['Slot']} - {row['Player']}" for _, row in lineup.iterrows()
-    )
-    st.code(lineup_text, language="text")
-
-def render_slate_control_center(hitters_live, pitchers_live, stacks_live, combined_excluded_players, weather_risk_teams):
-    top_stack = stacks_live.iloc[0]["Team"] if not stacks_live.empty else "N/A"
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("Active Hitters", len(hitters_live))
-    col2.metric("Active Pitchers", len(pitchers_live))
-    col3.metric("Excluded Players", len(combined_excluded_players))
-    col4.metric("Weather Teams", len(weather_risk_teams))
-
-    st.markdown(
-        f"""
-        ### Slate Status
-        - 🔥 **Top Stack:** {top_stack}
-        - 🌧 **Weather-risk teams removed:** {", ".join(weather_risk_teams) if weather_risk_teams else "None"}
-        - 🚑 **Unavailable / excluded players:** {len(combined_excluded_players)}
-        """
-    )
 
 def filter_unavailable(df, unavailable_players):
     unavailable_set = {str(p).strip() for p in unavailable_players if str(p).strip()}
@@ -72,28 +39,23 @@ def filter_unavailable(df, unavailable_players):
     ].copy()
 
 
-def parse_pasted_lineup(text):
-    players = []
+def render_saved_lineup_card():
+    if not has_saved_lineup():
+        return
 
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    saved_lineup, saved_salary, saved_score, saved_at = get_saved_lineup()
 
-        if " - " in line:
-            name = line.split(" - ", 1)[1]
-        elif "—" in line:
-            name = line.split("—", 1)[1]
-        else:
-            name = line
+    with st.expander("💾 Saved Morning Lineup", expanded=False):
+        st.write(f"Saved at: **{saved_at}**")
+        st.write(f"Salary: **${saved_salary:,.0f}**")
+        st.write(f"Projection: **{saved_score:.1f} pts**")
 
-        name = name.split("(")[0].strip()
-        name = name.split("|")[0].strip()
+        for _, row in saved_lineup.iterrows():
+            st.write(f"**{row['Slot']}** — {row['Player']} ({row['Team']})")
 
-        if name:
-            players.append(name)
-
-    return players
+        if st.button("🗑 Clear Saved Lineup"):
+            clear_saved_lineup()
+            st.rerun()
 
 
 if uploaded_file:
@@ -105,6 +67,11 @@ if uploaded_file:
     all_players = sorted(
         list(hitters["Players"].dropna().astype(str).unique())
         + list(pitchers["Players"].dropna().astype(str).unique())
+    )
+
+    all_teams = sorted(
+        list(hitters["Team"].dropna().astype(str).unique())
+        + list(pitchers["Team"].dropna().astype(str).unique())
     )
 
     tab_pitchers, tab_hitters, tab_stacks, tab_builder, tab_health = st.tabs(
@@ -126,17 +93,12 @@ if uploaded_file:
             help="Optimizer cannot include these players.",
         )
 
-        all_teams = sorted(
-            list(hitters["Team"].dropna().astype(str).unique())
-            + list(pitchers["Team"].dropna().astype(str).unique())
-        )
-
         weather_risk_teams = st.multiselect(
             "Exclude teams due to weather",
             options=all_teams,
             help="Removes all hitters and pitchers from selected weather-risk teams.",
         )
-        
+
         unavailable_text = st.text_area(
             "IL / bench / scratched players",
             placeholder="Paste one player per line",
@@ -174,6 +136,8 @@ if uploaded_file:
             combined_excluded_players,
             weather_risk_teams,
         )
+
+        render_saved_lineup_card()
 
         if stacks_live.empty:
             st.error("No valid stacks found after filtering unavailable players.")
@@ -227,85 +191,20 @@ if uploaded_file:
                     )
                 else:
                     st.session_state["current_lineup"] = lineup.copy()
+                    save_lineup(lineup, salary, score)
+
                     render_lineup(lineup, salary, score)
                     st.success("Lineup saved for Late Swap ✅")
-                    
-                    if has_saved_lineup():
-                        saved_lineup, saved_salary, saved_score, saved_at = get_saved_lineup()
-
-                        with st.expander("💾 Saved Morning Lineup", expanded=False):
-                            st.write(f"Saved at: **{saved_at}**")
-                            st.write(f"Salary: **${saved_salary:,.0f}**")
-                            st.write(f"Projection: **{saved_score:.1f} pts**")
-
-                            for _, row in saved_lineup.iterrows():
-                                st.write(f"**{row['Slot']}** — {row['Player']} ({row['Team']})")
-
-                            if st.button("🗑 Clear Saved Lineup"):
-                                clear_saved_lineup()
-                                st.rerun()
 
             st.divider()
 
-            st.subheader("Late Swap Assistant")
-
-            pasted_lineup = st.text_area(
-                "Optional: paste current DK lineup here",
-                placeholder="P - Player Name\nP - Player Name\nC - Player Name...",
+            render_late_swap_assistant(
+                hitters_live=hitters_live,
+                pitchers_live=pitchers_live,
+                stacks_live=stacks_live,
+                unavailable_players=unavailable_players,
+                combined_excluded_players=combined_excluded_players,
             )
-
-            if pasted_lineup.strip():
-                current_players = parse_pasted_lineup(pasted_lineup)
-            elif "current_lineup" in st.session_state:
-                current_players = (
-                    st.session_state["current_lineup"]["Player"]
-                    .dropna()
-                    .astype(str)
-                    .tolist()
-                )
-            else:
-                current_players = []
-
-            if current_players:
-                st.write(f"Current lineup detected: **{len(current_players)} players**")
-
-                unavailable_set = set(unavailable_players)
-                kept_players = [
-                    p for p in current_players
-                    if p not in unavailable_set
-                ]
-                scratched_from_lineup = [
-                    p for p in current_players
-                    if p in unavailable_set
-                ]
-
-                st.write(f"Keeping: **{len(kept_players)}**")
-                st.write(f"Replacing: **{len(scratched_from_lineup)}**")
-
-                if scratched_from_lineup:
-                    st.warning("Scratched/unavailable from current lineup: " + ", ".join(scratched_from_lineup))
-
-                if st.button("🔄 Late Swap Rebuild"):
-                    lineup, salary, score = late_swap_optimizer(
-                        hitters_live,
-                        pitchers_live,
-                        stacks_live,
-                        current_players,
-                        combined_excluded_players,
-                    )
-
-                if lineup.empty:
-                    st.error("No valid late swap found. Try unlocking one more player or relaxing constraints.")
-                else:
-                    st.success("Late swap completed ✅")
-
-                    render_lineup(lineup, salary, score)
-
-                    st.session_state["current_lineup"] = lineup.copy()
-                    save_lineup(lineup, salary, score)
-
-            else:
-                st.info("Build a lineup first or paste your current DK lineup to use Late Swap.")
 
             st.divider()
 
