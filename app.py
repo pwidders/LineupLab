@@ -100,6 +100,17 @@ if uploaded_file:
             help="Optimizer cannot include these players.",
         )
 
+        all_teams = sorted(
+            list(hitters["Team"].dropna().astype(str).unique())
+            + list(pitchers["Team"].dropna().astype(str).unique())
+        )
+
+        weather_risk_teams = st.multiselect(
+            "Exclude teams due to weather",
+            options=all_teams,
+            help="Removes all hitters and pitchers from selected weather-risk teams.",
+        )
+        
         unavailable_text = st.text_area(
             "IL / bench / scratched players",
             placeholder="Paste one player per line",
@@ -111,8 +122,19 @@ if uploaded_file:
             if p.strip()
         ]
 
+        weather_excluded_players = []
+
+        if weather_risk_teams:
+            weather_excluded_players += hitters[
+                hitters["Team"].astype(str).isin(weather_risk_teams)
+            ]["Players"].dropna().astype(str).tolist()
+
+            weather_excluded_players += pitchers[
+                pitchers["Team"].astype(str).isin(weather_risk_teams)
+            ]["Players"].dropna().astype(str).tolist()
+
         combined_excluded_players = sorted(
-            set(excluded_players + unavailable_players)
+            set(excluded_players + unavailable_players + weather_excluded_players)
         )
 
         hitters_live = filter_unavailable(hitters, combined_excluded_players)
@@ -122,7 +144,8 @@ if uploaded_file:
         st.info(
             f"Active hitters: {len(hitters_live)} | "
             f"Active pitchers: {len(pitchers_live)} | "
-            f"Unavailable/excluded: {len(combined_excluded_players)}"
+            f"Unavailable/excluded: {len(combined_excluded_players)} | "
+            f"Weather-risk teams: {len(weather_risk_teams)}"
         )
 
         if stacks_live.empty:
