@@ -8,6 +8,13 @@ from model import (
     build_real_optimizer_lineup,
     build_multiple_lineups,
 )
+from lineup_manager import (
+    save_lineup,
+    has_saved_lineup,
+    get_saved_lineup,
+    clear_saved_lineup,
+    get_saved_player_names,
+)
 
 DK_SALARY_CAP = 50000
 
@@ -221,6 +228,21 @@ if uploaded_file:
                     st.session_state["current_lineup"] = lineup.copy()
                     render_lineup(lineup, salary, score)
                     st.success("Lineup saved for Late Swap ✅")
+                    
+                    if has_saved_lineup():
+                        saved_lineup, saved_salary, saved_score, saved_at = get_saved_lineup()
+
+                        with st.expander("💾 Saved Morning Lineup", expanded=False):
+                            st.write(f"Saved at: **{saved_at}**")
+                            st.write(f"Salary: **${saved_salary:,.0f}**")
+                            st.write(f"Projection: **{saved_score:.1f} pts**")
+
+                            for _, row in saved_lineup.iterrows():
+                                st.write(f"**{row['Slot']}** — {row['Player']} ({row['Team']})")
+
+                            if st.button("🗑 Clear Saved Lineup"):
+                                clear_saved_lineup()
+                                st.rerun()
 
             st.divider()
 
