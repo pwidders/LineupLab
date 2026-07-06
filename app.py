@@ -17,6 +17,8 @@ from lineup_manager import (
 from render import render_lineup
 from slate_dashboard import render_slate_control_center
 from late_swap import render_late_swap_assistant
+from io import BytesIO
+from projection_store import save_projection_file, load_projection_file
 
 
 DK_SALARY_CAP = 50000
@@ -25,7 +27,24 @@ st.set_page_config(page_title="LineupLab", layout="wide")
 st.title("⚾ LineupLab")
 st.caption("MLB DFS Optimizer")
 
+st.sidebar.header("Projection Library")
+
 uploaded_file = st.file_uploader("Upload your Excel sheet", type=["xlsx", "xlsm"])
+
+if uploaded_file and st.sidebar.button("💾 Save Uploaded Sheet"):
+    try:
+        save_projection_file(uploaded_file)
+        st.sidebar.success("Saved latest projection sheet.")
+    except Exception as e:
+        st.sidebar.error(f"Save failed: {e}")
+
+if st.sidebar.button("📲 Load Latest Saved Sheet"):
+    try:
+        saved_bytes = load_projection_file()
+        uploaded_file = BytesIO(saved_bytes)
+        st.sidebar.success("Loaded latest saved sheet.")
+    except Exception as e:
+        st.sidebar.error(f"Load failed: {e}")
 
 
 def filter_unavailable(df, unavailable_players):
