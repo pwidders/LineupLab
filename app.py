@@ -82,6 +82,13 @@ def render_saved_lineup_card():
             st.rerun()
 
 
+tab_pitchers, tab_hitters, tab_stacks, tab_builder, tab_review, tab_health = st.tabs(
+    ["Pitchers", "Hitters", "Stacks", "Lineup Builder", "Contest Review", "Health Check"]
+)
+
+with tab_review:
+    render_contest_logger()
+
 if uploaded_file:
     hitters_raw, pitchers_raw, _ = load_excel(uploaded_file)
 
@@ -98,9 +105,6 @@ if uploaded_file:
         + list(pitchers["Team"].dropna().astype(str).unique())
     )
 
-    tab_pitchers, tab_hitters, tab_stacks, tab_builder, tab_review, tab_health = st.tabs(
-        ["Pitchers", "Hitters", "Stacks", "Lineup Builder", "Contest Review", "Health Check"]
-    )
 
     with tab_builder:
         st.subheader("Lineup Builder")
@@ -304,9 +308,6 @@ if uploaded_file:
         with st.expander("View All Live Stacks"):
             st.dataframe(stacks_live, use_container_width=True)
 
-    with tab_review:
-        render_contest_logger()
-    
     with tab_health:
         st.subheader("Health Check")
 
@@ -338,4 +339,17 @@ if uploaded_file:
                 st.warning(issue)
 
 else:
-    st.info("Upload your Excel projection sheet to begin.")
+    with tab_pitchers:
+        st.info("Upload projections to view pitchers.")
+
+    with tab_hitters:
+        st.info("Upload projections to view hitters.")
+
+    with tab_stacks:
+        st.info("Upload projections to view stacks.")
+
+    with tab_builder:
+        st.info("Upload your Excel projection sheet to use the lineup builder.")
+
+    with tab_health:
+        st.info("Upload projections to run health check.")
