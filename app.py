@@ -19,6 +19,7 @@ from slate_dashboard import render_slate_control_center
 from late_swap import render_late_swap_assistant
 from io import BytesIO
 from projection_store import save_projection_file, load_projection_file
+from contest_logger import render_contest_logger
 
 
 DK_SALARY_CAP = 50000
@@ -97,8 +98,8 @@ if uploaded_file:
         + list(pitchers["Team"].dropna().astype(str).unique())
     )
 
-    tab_pitchers, tab_hitters, tab_stacks, tab_builder, tab_health = st.tabs(
-        ["Pitchers", "Hitters", "Stacks", "Lineup Builder", "Health Check"]
+    tab_pitchers, tab_hitters, tab_stacks, tab_builder, tab_review, tab_health = st.tabs(
+        ["Pitchers", "Hitters", "Stacks", "Lineup Builder", "Contest Review", "Health Check"]
     )
 
     with tab_builder:
@@ -303,6 +304,9 @@ if uploaded_file:
         with st.expander("View All Live Stacks"):
             st.dataframe(stacks_live, use_container_width=True)
 
+    with tab_review:
+        render_contest_logger()
+    
     with tab_health:
         st.subheader("Health Check")
 
