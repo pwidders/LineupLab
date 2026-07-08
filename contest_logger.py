@@ -1,9 +1,12 @@
-import streamlit as st
+import hashlib
+from datetime import datetime, date
+
 import pandas as pd
-from datetime import datetime
+import streamlit as st
 
 
 DEFAULT_ENTRY_NAME = "rentisdue"
+DOUBLE_UP_FIELD_SIZE_CUTOFF = 100
 
 
 def parse_percent(x):
@@ -13,41 +16,86 @@ def parse_percent(x):
         return 0.0
 
 
-def _required_columns_present(df, required_cols):
-    missing = [col for col in required_cols if col not in df.columns]
-    return missing
-
-
-def _safe_num(value, default=0.0):
+def safe_num(value, default=0.0):
     try:
         return float(value)
     except Exception:
         return default
 
 
-def _render_single_contest(file, file_index):
+def clean_col_name(col):
+    return str(col).strip().replace("\ufeff", "")
+
+
+def find_col(df, possible_names):
+    lookup = {clean_col_name(c).lower(): c for c in df.columns}
+    for name in possible_names:
+        if name.lower() in lookup:
+            return lookup[name.lower()]
+    return None
+
+
+def make_lineup_id(lineup_text):
+    cleaned = "|".join(
+        sorted(
+            p.strip().lower()
+            for p in str(lineup_text).replace(";", ",").split(",")
+            if p.strip()
+        )
+    )
+    if not cleaned:
+        cleaned = str(lineup_text).strip().lower()
+    return hashlib.md5(cleaned.encode("utf-8")).hexdigest()[:10]
+
+
+def infer_contest_type(field_size):
+    if field_size and field_size < DOUBLE_UP_FIELD_SIZE_CUTOFF:
+        return "Double-Up"
+    return "Single-Entry GPP"
+
+
+def render_single_contest(file, file_index, slate_date):
     try:
         df = pd.read_csv(file)
     except Exception as e:
         st.error(f"Could not read {file.name}: {e}")
         return None
 
-    required_cols = ["EntryName", "Rank", "Points", "Lineup", "Player", "Roster Position", "%Drafted", "FPTS"]
-    missing = _required_columns_present(df, required_cols)
+    df.columns = [clean_col_name(c) for c in df.columns]
 
+    entry_col = find_col(df, ["EntryName", "Entry Name"])
+    rank_col = find_col(df, ["Rank", "Place"])
+    points_col = find_col(df, ["Points", "FPTS", "Fantasy Points"])
+    lineup_col = find_col(df, ["Lineup"])
+    player_col = find_col(df, ["Player", "PlayerName", "Name"])
+    roster_col = find_col(df, ["Roster Position", "RosterPosition", "Position", "Pos"])
+    drafted_col = find_col(df, ["%Drafted", "% Drafted", "Ownership", "Own%"])
+    fpts_col = find_col(df, ["FPTS", "Fantasy Points", "Points"])
+
+    required = {
+        "EntryName": entry_col,
+        "Rank": rank_col,
+        "Points": points_col,
+        "Lineup": lineup_col,
+        "Player": player_col,
+        "Roster Position": roster_col,
+        "%Drafted": drafted_col,
+        "FPTS": fpts_col,
+    }
+    missing = [name for name, col in required.items() if col is None]
     if missing:
         st.error(f"{file.name} is missing required columns: {', '.join(missing)}")
+        st.caption(f"Columns found: {', '.join(df.columns.astype(str))}")
         return None
 
-    standings = df[df["EntryName"].notna()].copy()
-    player_rows = df[df["Player"].notna()].copy()
+    standings = df[df[entry_col].notna()].copy()
+    player_rows = df[df[player_col].notna()].copy()
 
     if standings.empty:
         st.warning(f"No standings rows found in {file.name}.")
         return None
 
-    entry_names = standings["EntryName"].dropna().astype(str).unique().tolist()
-
+    entry_names = standings[entry_col].dropna().astype(str).unique().tolist()
     default_index = 0
     for i, name in enumerate(entry_names):
         if name.lower() == DEFAULT_ENTRY_NAME:
@@ -61,32 +109,42 @@ def _render_single_contest(file, file_index):
         key=f"contest_entry_select_{file_index}_{file.name}",
     )
 
-    my_row = standings[standings["EntryName"].astype(str) == selected_entry].iloc[0]
+    my_row = standings[standings[entry_col].astype(str) == selected_entry].iloc[0]
 
-    rank = int(_safe_num(my_row["Rank"], 0))
-    field_size = int(pd.to_numeric(standings["Rank"], errors="coerce").max())
-    points = _safe_num(my_row["Points"], 0.0)
-    lineup_text = str(my_row["Lineup"])
+    rank = int(safe_num(my_row[rank_col], 0))
+    field_size = int(pd.to_numeric(standings[rank_col], errors="coerce").max())
+    points = safe_num(my_row[points_col], 0.0)
+    lineup_text = str(my_row[lineup_col])
     rank_pct = rank / field_size if field_size else 0
+    lineup_id = make_lineup_id(lineup_text)
+    suggested_type = infer_contest_type(field_size)
 
-    col1, col2, col3, col4 = st.columns(4)
+    contest_type = st.selectbox(
+        "Contest type",
+        ["Double-Up", "Single-Entry GPP", "Other"],
+        index=["Double-Up", "Single-Entry GPP", "Other"].index(suggested_type),
+        key=f"contest_type_{file_index}_{file.name}",
+        help="Auto-suggested from field size. Less than 100 entries defaults to Double-Up.",
+    )
+
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Entry", selected_entry)
-    col2.metric("Rank", f"{rank} / {field_size}")
-    col3.metric("Points", round(points, 2))
-    col4.metric("Rank Percentile", f"{rank_pct:.1%}")
+    col2.metric("Contest Type", contest_type)
+    col3.metric("Rank", f"{rank} / {field_size}")
+    col4.metric("Points", round(points, 2))
+    col5.metric("Rank Percentile", f"{rank_pct:.1%}")
 
     st.markdown("### Lineup")
     st.write(lineup_text)
+    st.caption(f"Lineup ID: {lineup_id}")
 
-    player_rows["Ownership %"] = player_rows["%Drafted"].apply(parse_percent)
-    player_rows["FPTS"] = pd.to_numeric(player_rows["FPTS"], errors="coerce").fillna(0)
+    player_rows["Ownership %"] = player_rows[drafted_col].apply(parse_percent)
+    player_rows["FPTS"] = pd.to_numeric(player_rows[fpts_col], errors="coerce").fillna(0)
 
     st.markdown("### Player Ownership / Results")
-    visible_cols = ["Player", "Roster Position", "Ownership %", "FPTS"]
-    st.dataframe(
-        player_rows[visible_cols].sort_values("Ownership %", ascending=False),
-        use_container_width=True,
-    )
+    visible = player_rows[[player_col, roster_col, "Ownership %", "FPTS"]].copy()
+    visible.columns = ["Player", "Roster Position", "Ownership %", "FPTS"]
+    st.dataframe(visible.sort_values("Ownership %", ascending=False), use_container_width=True)
 
     avg_ownership = player_rows["Ownership %"].mean()
     total_player_fpts = player_rows["FPTS"].sum()
@@ -96,15 +154,17 @@ def _render_single_contest(file, file_index):
     if not player_rows.empty:
         best_player_row = player_rows.sort_values("FPTS", ascending=False).iloc[0]
         worst_player_row = player_rows.sort_values("FPTS", ascending=True).iloc[0]
-        best_player = f"{best_player_row['Player']} ({best_player_row['FPTS']})"
-        worst_player = f"{worst_player_row['Player']} ({worst_player_row['FPTS']})"
+        best_player = f"{best_player_row[player_col]} ({best_player_row['FPTS']})"
+        worst_player = f"{worst_player_row[player_col]} ({worst_player_row['FPTS']})"
 
     summary = pd.DataFrame(
         [
             {
+                "Slate Date": slate_date.strftime("%Y-%m-%d"),
                 "Logged At": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "Source File": file.name,
                 "Entry Name": selected_entry,
+                "Contest Type": contest_type,
                 "Rank": rank,
                 "Field Size": field_size,
                 "Points": points,
@@ -113,6 +173,7 @@ def _render_single_contest(file, file_index):
                 "Player FPTS Total": total_player_fpts,
                 "Best Player": best_player,
                 "Worst Player": worst_player,
+                "Lineup ID": lineup_id,
                 "Lineup": lineup_text,
             }
         ]
@@ -135,6 +196,12 @@ def _render_single_contest(file, file_index):
 def render_contest_logger():
     st.subheader("Contest Stat Collector")
 
+    slate_date = st.date_input(
+        "Slate date",
+        value=date.today(),
+        help="DraftKings exports do not include a slate date, so choose the date this contest belongs to.",
+    )
+
     uploaded_files = st.file_uploader(
         "Upload DraftKings contest standings CSV",
         type=["csv"],
@@ -150,7 +217,7 @@ def render_contest_logger():
 
     for i, file in enumerate(uploaded_files):
         with st.expander(f"{file.name}", expanded=(i == 0)):
-            summary = _render_single_contest(file, i)
+            summary = render_single_contest(file, i, slate_date)
             if summary is not None:
                 all_summaries.append(summary)
 
@@ -160,6 +227,12 @@ def render_contest_logger():
         st.divider()
         st.markdown("### Combined Contest Log")
         st.dataframe(combined, use_container_width=True)
+
+        duplicate_lineups = combined[combined.duplicated("Lineup ID", keep=False)]
+        if not duplicate_lineups.empty:
+            st.info(
+                "Duplicate lineup detected across contest files. This is expected when you enter the same lineup in both a double-up and a GPP. They are still logged as separate contest results."
+            )
 
         st.download_button(
             "Download Combined Contest Log",
