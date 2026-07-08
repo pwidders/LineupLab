@@ -17,6 +17,9 @@ from lineup_manager import (
 from render import render_lineup
 from slate_dashboard import render_slate_control_center
 from late_swap import render_late_swap_assistant
+from io import BytesIO
+from projection_store import save_projection_file, load_projection_file
+from contest_logger import render_contest_logger
 
 
 DK_SALARY_CAP = 50000
@@ -25,7 +28,28 @@ st.set_page_config(page_title="LineupLab", layout="wide")
 st.title("⚾ LineupLab")
 st.caption("MLB DFS Optimizer")
 
+st.sidebar.header("Projection Library")
+
 uploaded_file = st.file_uploader("Upload your Excel sheet", type=["xlsx", "xlsm"])
+
+if uploaded_file and st.sidebar.button("💾 Save Uploaded Sheet"):
+    try:
+        save_projection_file(uploaded_file)
+        st.sidebar.success("Saved latest projection sheet.")
+    except Exception as e:
+        st.sidebar.error(f"Save failed: {e}")
+
+if st.sidebar.button("📲 Load Latest Saved Sheet"):
+    try:
+        saved_bytes = load_projection_file()
+        st.session_state["saved_projection_bytes"] = saved_bytes
+        st.sidebar.success("Loaded latest saved sheet.")
+    except Exception as e:
+        st.sidebar.error(f"Load failed: {e}")
+
+if uploaded_file is None and "saved_projection_bytes" in st.session_state:
+    uploaded_file = BytesIO(st.session_state["saved_projection_bytes"])
+    uploaded_file.name = "latest_projection_sheet.xlsx"
 
 
 def filter_unavailable(df, unavailable_players):
@@ -58,6 +82,13 @@ def render_saved_lineup_card():
             st.rerun()
 
 
+tab_pitchers, tab_hitters, tab_stacks, tab_builder, tab_review, tab_health = st.tabs(
+    ["Pitchers", "Hitters", "Stacks", "Lineup Builder", "Contest Review", "Health Check"]
+)
+
+with tab_review:
+    render_contest_logger()
+
 if uploaded_file:
     hitters_raw, pitchers_raw, _ = load_excel(uploaded_file)
 
@@ -74,9 +105,6 @@ if uploaded_file:
         + list(pitchers["Team"].dropna().astype(str).unique())
     )
 
-    tab_pitchers, tab_hitters, tab_stacks, tab_builder, tab_health = st.tabs(
-        ["Pitchers", "Hitters", "Stacks", "Lineup Builder", "Health Check"]
-    )
 
     with tab_builder:
         st.subheader("Lineup Builder")
@@ -99,16 +127,29 @@ if uploaded_file:
             help="Removes all hitters and pitchers from selected weather-risk teams.",
         )
 
-        unavailable_text = st.text_area(
-            "IL / bench / scratched players",
-            placeholder="Paste one player per line",
+        st.write("### IL / Bench / Scratched")
+
+        unavailable_players = st.multiselect(
+            "Select unavailable players",
+            options=all_players,
+            help="Tap players to remove them from the player pool.",
         )
 
-        unavailable_players = [
-            p.strip()
-            for p in unavailable_text.splitlines()
-            if p.strip()
-        ]
+        with st.expander("Or paste player names (desktop)"):
+            unavailable_text = st.text_area(
+                "Paste one player per line",
+                placeholder="One player per line",
+            )
+
+            unavailable_players.extend(
+                [
+                    p.strip()
+                    for p in unavailable_text.splitlines()
+                    if p.strip()
+                ]
+            )
+
+        unavailable_players = sorted(set(unavailable_players))
 
         weather_excluded_players = []
 
@@ -298,4 +339,17 @@ if uploaded_file:
                 st.warning(issue)
 
 else:
-    st.info("Upload your Excel projection sheet to begin.")
+    with tab_pitchers:
+        st.info("Upload projections to view pitchers.")
+
+    with tab_hitters:
+        st.info("Upload projections to view hitters.")
+
+    with tab_stacks:
+        st.info("Upload projections to view stacks.")
+
+    with tab_builder:
+        st.info("Upload your Excel projection sheet to use the lineup builder.")
+
+    with tab_health:
+        st.info("Upload projections to run health check.")
