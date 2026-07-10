@@ -36,6 +36,7 @@ def render_late_swap_assistant(
     stacks_live,
     unavailable_players,
     combined_excluded_players,
+    manual_locked_players=None,
 ):
     st.subheader("Late Swap Assistant")
 
@@ -91,6 +92,7 @@ def render_late_swap_assistant(
             current_players,
             combined_excluded_players,
             min_salary=late_swap_salary_floor,
+            manual_locked_players=manual_locked_players,
         )
 
         if lineup.empty:
