@@ -516,6 +516,7 @@ def late_swap_optimizer(
     current_players,
     unavailable_players,
     min_salary=49000,
+    manual_locked_players=None,
 ):
     """
     Late swap optimizer that tries to preserve as much of the current lineup as possible.
@@ -533,6 +534,17 @@ def late_swap_optimizer(
         str(p).strip()
         for p in current_players
         if str(p).strip() and str(p).strip() not in unavailable
+    ]
+
+    manual_locked_players = {
+    str(p).strip()
+    for p in (manual_locked_players or [])
+    if str(p).strip()
+    }
+
+    hard_locked_players = [
+        p for p in available_current_players
+        if p in manual_locked_players
     ]
 
     # Combine hitters + pitchers so we can rank current players by Score
@@ -563,10 +575,16 @@ def late_swap_optimizer(
             else []
         )
 
-        locked_players = [
-            p for p in available_current_players
-            if p not in players_to_unlock
-        ]
+        locked_players = sorted(
+            set(
+                hard_locked_players
+                + [
+                    p
+                    for p in available_current_players
+                    if p not in players_to_unlock
+                ]
+            )
+        )
 
         lineup, salary, score = build_real_optimizer_lineup(
             hitters,
