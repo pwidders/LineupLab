@@ -245,6 +245,7 @@ if uploaded_file:
                 stacks_live=stacks_live,
                 unavailable_players=unavailable_players,
                 combined_excluded_players=combined_excluded_players,
+                manual_locked_players=locked_players,
             )
 
             st.divider()
