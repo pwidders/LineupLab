@@ -39,6 +39,14 @@ def render_late_swap_assistant(
     manual_locked_players=None,
 ):
     st.subheader("Late Swap Assistant")
+    if "last_late_swap_lineup" in st.session_state:
+        st.success("Latest late swap completed ✅")
+
+        render_lineup(
+            st.session_state["last_late_swap_lineup"],
+            st.session_state["last_late_swap_salary"],
+            st.session_state["last_late_swap_score"],
+        )
 
     pasted_lineup = st.text_area(
         "Optional: paste current DK lineup here",
@@ -105,6 +113,9 @@ def render_late_swap_assistant(
         render_lineup(lineup, salary, score)
 
         st.session_state["current_lineup"] = lineup.copy()
-        save_lineup(lineup, salary, score)
-        
+
+        st.session_state["last_late_swap_lineup"] = lineup.copy()
+        st.session_state["last_late_swap_salary"] = salary
+        st.session_state["last_late_swap_score"] = score
+
         st.rerun()
