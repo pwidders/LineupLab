@@ -106,3 +106,5 @@ def render_late_swap_assistant(
 
         st.session_state["current_lineup"] = lineup.copy()
         save_lineup(lineup, salary, score)
+        
+        st.rerun()
