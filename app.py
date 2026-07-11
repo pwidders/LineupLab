@@ -214,6 +214,18 @@ if uploaded_file:
                 step=1,
             )
 
+            max_player_appearances = st.number_input(
+                "Maximum appearances per player",
+                min_value=1,
+                max_value=int(num_lineups),
+                value=max(1, int(num_lineups) - 1),
+                step=1,
+                help=(
+                    "Maximum number of generated lineups in which a non-locked player "
+                    "may appear. Locked players are exempt."
+                ),
+            )
+
             if st.button("Build Real Optimizer Lineup"):
                 lineup, salary, score = build_real_optimizer_lineup(
                     hitters_live,
@@ -261,6 +273,7 @@ if uploaded_file:
                     primary_stack=primary_stack,
                     secondary_stack=secondary_stack,
                     min_salary=min_salary,
+                    max_player_appearances=int(max_player_appearances),
                 )
 
                 if multi.empty:

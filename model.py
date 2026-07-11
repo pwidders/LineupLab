@@ -453,56 +453,117 @@ def build_multiple_lineups(
     excluded_players=None,
     primary_stack=None,
     secondary_stack=None,
-    min_salary=0
+    min_salary=0,
+    max_player_appearances=None,
 ):
-    lineups = []
-    global_excludes = set(excluded_players or [])
-    previous_lineup_sets = []
+    """
+    Build multiple lineups while controlling player exposure.
 
-    for n in range(num_lineups):
+    Non-locked players may appear no more than max_player_appearances times.
+    Locked players are exempt from the exposure cap.
+    """
+
+    num_lineups = int(num_lineups)
+    locked_set = {
+        str(player).strip()
+        for player in (locked_players or [])
+        if str(player).strip()
+    }
+
+    base_excludes = {
+        str(player).strip()
+        for player in (excluded_players or [])
+        if str(player).strip()
+    }
+
+    if max_player_appearances is None:
+        max_player_appearances = max(1, num_lineups - 1)
+
+    max_player_appearances = int(max_player_appearances)
+
+    lineups = []
+    previous_lineup_sets = []
+    player_appearance_counts = {}
+
+    # Used only to force the next lineup to differ.
+    # Unlike a permanent exclude, this player may return in a later lineup.
+    temporary_excludes = set()
+
+    for lineup_number in range(1, num_lineups + 1):
+        exposure_excludes = {
+            player
+            for player, appearances in player_appearance_counts.items()
+            if appearances >= max_player_appearances
+            and player not in locked_set
+        }
+
+        current_excludes = sorted(
+            base_excludes
+            | exposure_excludes
+            | temporary_excludes
+        )
+
         lineup, salary, score = build_real_optimizer_lineup(
             hitters,
             pitchers,
             stacks_df,
-            locked_players=locked_players,
-            excluded_players=list(global_excludes),
+            locked_players=list(locked_set),
+            excluded_players=current_excludes,
             primary_stack=primary_stack,
             secondary_stack=secondary_stack,
-            min_salary=min_salary
+            min_salary=min_salary,
         )
 
         if lineup.empty:
             break
 
-        lineup_players = set(lineup["Player"].astype(str))
+        lineup_players = set(
+            lineup["Player"].dropna().astype(str).str.strip()
+        )
 
-        # Avoid exact duplicate lineups
+        # Safety check against an exact duplicate lineup.
         if lineup_players in previous_lineup_sets:
             break
 
         lineup = lineup.copy()
-        lineup["Lineup #"] = n + 1
+        lineup["Lineup #"] = lineup_number
         lineups.append(lineup)
         previous_lineup_sets.append(lineup_players)
 
-        # Smarter variation:
-        # Exclude a strong, non-locked hitter from the current lineup,
-        # not the weakest punt.
-        hitters_only = lineup[lineup["Slot"] != "P"].copy()
-        hitters_only = hitters_only[~hitters_only["Player"].astype(str).isin(set(locked_players or []))]
+        # Update exposure totals.
+        for player in lineup_players:
+            player_appearance_counts[player] = (
+                player_appearance_counts.get(player, 0) + 1
+            )
 
-        if hitters_only.empty:
-            break
+        # Force only the next lineup to vary.
+        temporary_excludes = set()
 
-        # Avoid excluding pitchers. Pick from upper-middle hitters to force meaningful variation.
-        hitters_only = hitters_only.sort_values("Score", ascending=False)
+        available_variation_players = lineup[
+            ~lineup["Player"].astype(str).isin(locked_set)
+        ].copy()
 
-        if len(hitters_only) >= 4:
-            player_to_exclude = hitters_only.iloc[2]["Player"]
-        else:
-            player_to_exclude = hitters_only.iloc[0]["Player"]
+        if not available_variation_players.empty:
+            available_variation_players = (
+                available_variation_players
+                .sort_values("Score", ascending=False)
+            )
 
-        global_excludes.add(str(player_to_exclude))
+            # Prefer rotating a hitter rather than a pitcher.
+            hitter_candidates = available_variation_players[
+                available_variation_players["Slot"] != "P"
+            ]
+
+            if not hitter_candidates.empty:
+                variation_player = str(
+                    hitter_candidates.iloc[0]["Player"]
+                ).strip()
+            else:
+                variation_player = str(
+                    available_variation_players.iloc[0]["Player"]
+                ).strip()
+
+            temporary_excludes.add(variation_player)
 
     if not lineups:
         return pd.DataFrame()
