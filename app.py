@@ -605,53 +605,172 @@ if uploaded_file:
 
             st.divider()
 
-            if st.button("Build Multiple Lineups"):
-                multi = build_multiple_lineups(
-                    hitters_live,
-                    pitchers_live,
-                    stacks_live,
-                    num_lineups=num_lineups,
-                    locked_players=locked_players,
-                    excluded_players=(
-                        combined_excluded_players
-                    ),
-                    primary_stack=primary_stack,
-                    secondary_stack=secondary_stack,
-                    min_salary=min_salary,
-                )
+    if st.button("Build Multiple Lineups"):
+        multi = build_multiple_lineups(
+            hitters_live,
+            pitchers_live,
+            stacks_live,
+            num_lineups=num_lineups,
+            locked_players=locked_players,
+            excluded_players=combined_excluded_players,
+            primary_stack=primary_stack,
+            secondary_stack=secondary_stack,
+            min_salary=min_salary,
+        )
 
-                if multi.empty:
-                    st.error(
-                        "No multiple lineups found. Try "
-                        "lowering minimum salary or relaxing "
-                        "locks/excludes."
-                    )
-                else:
-                    for lineup_num, lineup_df in multi.groupby(
-                        "Lineup #"
+        if multi.empty:
+            st.error(
+                "No multiple lineups found. Try lowering minimum salary "
+                "or relaxing locks/excludes."
+            )
+            st.session_state.pop("generated_multi_lineups", None)
+
+        else:
+            generated_lineups = {}
+
+            for lineup_num, lineup_df in multi.groupby("Lineup #"):
+                lineup_num = int(lineup_num)
+
+                lineup_clean = lineup_df.drop(
+                    columns=["Lineup #"],
+                    errors="ignore",
+                ).copy()
+
+                lineup_salary = float(lineup_clean["Salary"].sum())
+                lineup_score = float(lineup_clean["Score"].sum())
+
+                generated_lineups[lineup_num] = {
+                    "lineup": lineup_clean,
+                    "salary": lineup_salary,
+                    "score": lineup_score,
+                }
+
+            st.session_state["generated_multi_lineups"] = generated_lineups
+
+
+    generated_multi_lineups = st.session_state.get(
+        "generated_multi_lineups",
+        {},
+    )
+
+    if generated_multi_lineups:
+        st.subheader("Generated Multiple Lineups")
+
+        first_vault_slot = st.number_input(
+            "First Lineup Vault slot",
+            min_value=1,
+            max_value=20,
+            value=int(vault_lineup_slot),
+            step=1,
+            help=(
+                "Generated lineups will be saved consecutively. "
+                "Starting at slot 1 saves them as Lineup #1, #2, and #3."
+            ),
+            key="multi_first_vault_slot",
+        )
+
+        highest_required_slot = (
+            int(first_vault_slot)
+            + len(generated_multi_lineups)
+            - 1
+        )
+
+        if highest_required_slot > 20:
+            st.error(
+                "There are not enough available Vault slots. "
+                "Choose a lower starting slot."
+            )
+
+        else:
+            if st.button(
+                "☁️ Save All Generated Lineups to Vault",
+                key="save_all_generated_lineups",
+            ):
+                try:
+                    for lineup_num, lineup_info in sorted(
+                        generated_multi_lineups.items()
                     ):
-                        st.subheader(
-                            f"Lineup {lineup_num}"
+                        target_slot = (
+                            int(first_vault_slot)
+                            + int(lineup_num)
+                            - 1
                         )
 
-                        lineup_clean = lineup_df.drop(
-                            columns=["Lineup #"],
-                            errors="ignore",
+                        save_cloud_lineup(
+                            lineup=lineup_info["lineup"],
+                            salary=lineup_info["salary"],
+                            projected_score=lineup_info["score"],
+                            slate_date=vault_slate_date_str,
+                            slate_name=vault_slate_name,
+                            lineup_slot=target_slot,
+                            lineup_name=f"Lineup #{target_slot}",
                         )
 
-                        lineup_salary = (
-                            lineup_clean["Salary"].sum()
-                        )
-                        lineup_score = (
-                            lineup_clean["Score"].sum()
-                        )
+                    st.session_state["active_cloud_lineup_slot"] = int(
+                        first_vault_slot
+                    )
 
-                        render_lineup(
-                            lineup_clean,
-                            lineup_salary,
-                            lineup_score,
-                        )
-                        st.divider()
+                    st.success(
+                        f"Saved {len(generated_multi_lineups)} "
+                        "lineups to the Lineup Vault ✅"
+                    )
+                    st.rerun()
+
+                except Exception as exc:
+                    st.error(
+                        f"Could not save generated lineups: {exc}"
+                    )
+
+        for lineup_num, lineup_info in sorted(
+            generated_multi_lineups.items()
+        ):
+            target_slot = (
+                int(first_vault_slot)
+                + int(lineup_num)
+                - 1
+            )
+
+            st.markdown(
+                f"### Generated Lineup {lineup_num} "
+                f"→ Vault Slot #{target_slot}"
+            )
+
+            render_lineup(
+                lineup_info["lineup"],
+                lineup_info["salary"],
+                lineup_info["score"],
+            )
+
+            if st.button(
+                f"💾 Save Only This Lineup to Slot #{target_slot}",
+                key=f"save_generated_lineup_{lineup_num}",
+            ):
+                try:
+                    save_cloud_lineup(
+                        lineup=lineup_info["lineup"],
+                        salary=lineup_info["salary"],
+                        projected_score=lineup_info["score"],
+                        slate_date=vault_slate_date_str,
+                        slate_name=vault_slate_name,
+                        lineup_slot=target_slot,
+                        lineup_name=f"Lineup #{target_slot}",
+                    )
+
+                    st.session_state[
+                        "active_cloud_lineup_slot"
+                    ] = target_slot
+
+                    st.success(
+                        f"Saved Lineup #{target_slot} ✅"
+                    )
+                    st.rerun()
+
+                except Exception as exc:
+                    st.error(
+                        f"Could not save Lineup #{target_slot}: {exc}"
+                    )
+
+            st.divider()
 
     if "hitters_live" not in locals():
         hitters_live = hitters
