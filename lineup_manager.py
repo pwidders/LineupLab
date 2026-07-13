@@ -2,36 +2,57 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-
-def save_lineup(lineup: pd.DataFrame, salary: float, score: float) -> None:
-    st.session_state["saved_lineup"] = lineup.copy()
-    st.session_state["saved_salary"] = salary
-    st.session_state["saved_score"] = score
-    st.session_state["saved_at"] = datetime.now().strftime("%I:%M %p")
+WORKING_LINEUP_KEY = "current_lineup"
+WORKING_SALARY_KEY = "current_salary"
+WORKING_SCORE_KEY = "current_score"
+WORKING_UPDATED_KEY = "current_updated_at"
 
 
-def has_saved_lineup() -> bool:
-    return "saved_lineup" in st.session_state
+def set_working_lineup(lineup: pd.DataFrame, salary: float, score: float) -> None:
+    if lineup is None or lineup.empty:
+        raise ValueError("Cannot set an empty working lineup.")
+
+    st.session_state[WORKING_LINEUP_KEY] = lineup.copy()
+    st.session_state[WORKING_SALARY_KEY] = float(salary)
+    st.session_state[WORKING_SCORE_KEY] = float(score)
+    st.session_state[WORKING_UPDATED_KEY] = datetime.now().strftime("%I:%M %p")
 
 
-def get_saved_lineup():
+def has_working_lineup() -> bool:
+    lineup = st.session_state.get(WORKING_LINEUP_KEY)
+    return lineup is not None and not lineup.empty
+
+
+def get_working_lineup():
     return (
-        st.session_state.get("saved_lineup"),
-        st.session_state.get("saved_salary", 0),
-        st.session_state.get("saved_score", 0),
-        st.session_state.get("saved_at", "Unknown"),
+        st.session_state.get(WORKING_LINEUP_KEY),
+        float(st.session_state.get(WORKING_SALARY_KEY, 0)),
+        float(st.session_state.get(WORKING_SCORE_KEY, 0)),
+        st.session_state.get(WORKING_UPDATED_KEY, "Unknown"),
     )
 
 
-def clear_saved_lineup() -> None:
-    for key in ["saved_lineup", "saved_salary", "saved_score", "saved_at"]:
-        if key in st.session_state:
-            del st.session_state[key]
+def clear_working_lineup() -> None:
+    for key in [
+        WORKING_LINEUP_KEY,
+        WORKING_SALARY_KEY,
+        WORKING_SCORE_KEY,
+        WORKING_UPDATED_KEY,
+    ]:
+        st.session_state.pop(key, None)
 
 
-def get_saved_player_names() -> list[str]:
-    if not has_saved_lineup():
+def get_working_player_names() -> list[str]:
+    if not has_working_lineup():
         return []
 
-    lineup = st.session_state["saved_lineup"]
+    lineup = st.session_state[WORKING_LINEUP_KEY]
     return lineup["Player"].dropna().astype(str).tolist()
+
+
+# Backward-compatible aliases for older modules.
+save_lineup = set_working_lineup
+has_saved_lineup = has_working_lineup
+get_saved_lineup = get_working_lineup
+clear_saved_lineup = clear_working_lineup
+get_saved_player_names = get_working_player_names

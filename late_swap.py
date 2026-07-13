@@ -1,8 +1,11 @@
 import streamlit as st
 
+from lineup_manager import (
+    get_working_lineup,
+    has_working_lineup,
+    set_working_lineup,
+)
 from model import late_swap_optimizer
-from lineup_manager import save_lineup
-from render import render_lineup
 
 
 def parse_pasted_lineup(text):
@@ -39,14 +42,6 @@ def render_late_swap_assistant(
     manual_locked_players=None,
 ):
     st.subheader("Late Swap Assistant")
-    if "last_late_swap_lineup" in st.session_state:
-        st.success("Latest late swap completed ✅")
-
-        render_lineup(
-            st.session_state["last_late_swap_lineup"],
-            st.session_state["last_late_swap_salary"],
-            st.session_state["last_late_swap_score"],
-        )
 
     pasted_lineup = st.text_area(
         "Optional: paste current DK lineup here",
@@ -55,9 +50,10 @@ def render_late_swap_assistant(
 
     if pasted_lineup.strip():
         current_players = parse_pasted_lineup(pasted_lineup)
-    elif "current_lineup" in st.session_state:
+    elif has_working_lineup():
+        working_lineup, _, _, _ = get_working_lineup()
         current_players = (
-            st.session_state["current_lineup"]["Player"]
+            working_lineup["Player"]
             .dropna()
             .astype(str)
             .tolist()
@@ -66,13 +62,28 @@ def render_late_swap_assistant(
         current_players = []
 
     if not current_players:
-        st.info("Build a lineup first or paste your current DK lineup to use Late Swap.")
+        st.info(
+            "Load a lineup from the Vault, build a lineup, "
+            "or paste a current DK lineup to use Late Swap."
+        )
         return
 
-    unavailable_set = set(unavailable_players)
+    unavailable_set = {
+        str(player).strip()
+        for player in unavailable_players
+        if str(player).strip()
+    }
 
-    kept_players = [p for p in current_players if p not in unavailable_set]
-    scratched_from_lineup = [p for p in current_players if p in unavailable_set]
+    kept_players = [
+        player
+        for player in current_players
+        if player not in unavailable_set
+    ]
+    scratched_from_lineup = [
+        player
+        for player in current_players
+        if player in unavailable_set
+    ]
 
     st.write(f"Current lineup detected: **{len(current_players)} players**")
     st.write(f"Keeping: **{len(kept_players)}**")
@@ -84,15 +95,16 @@ def render_late_swap_assistant(
             + ", ".join(scratched_from_lineup)
         )
 
-    if st.button("🔄 Late Swap Rebuild"):
-        late_swap_salary_floor = st.number_input(
-            "Minimum salary after late swap",
-            min_value=0,
-            max_value=50000,
-            value=49000,
-            step=100,
-        )
+    late_swap_salary_floor = st.number_input(
+        "Minimum salary after late swap",
+        min_value=0,
+        max_value=50000,
+        value=49000,
+        step=100,
+        key="late_swap_salary_floor",
+    )
 
+    if st.button("🔄 Late Swap Rebuild", key="late_swap_rebuild"):
         lineup, salary, score = late_swap_optimizer(
             hitters_live,
             pitchers_live,
@@ -105,17 +117,11 @@ def render_late_swap_assistant(
 
         if lineup.empty:
             st.error(
-                "No valid late swap found. Try unlocking one more player or relaxing constraints."
+                "No valid late swap found. Try unlocking one more player "
+                "or relaxing constraints."
             )
             return
 
-        st.success("Late swap completed ✅")
-        render_lineup(lineup, salary, score)
-
-        st.session_state["current_lineup"] = lineup.copy()
-
-        st.session_state["last_late_swap_lineup"] = lineup.copy()
-        st.session_state["last_late_swap_salary"] = salary
-        st.session_state["last_late_swap_score"] = score
-
+        set_working_lineup(lineup, salary, score)
+        st.session_state["working_lineup_notice"] = "Late swap completed ✅"
         st.rerun()
