@@ -1,5 +1,7 @@
 import pandas as pd
 import pulp
+import math
+from collections import Counter
 
 def percent_rank(series):
     series = pd.to_numeric(series, errors="coerce").fillna(0)
@@ -453,61 +455,130 @@ def build_multiple_lineups(
     excluded_players=None,
     primary_stack=None,
     secondary_stack=None,
-    min_salary=0
+    min_salary=0,
+    max_player_exposure=66,
 ):
-    lineups = []
-    global_excludes = set(excluded_players or [])
-    previous_lineup_sets = []
+    """
+    Build multiple lineups with both:
+    1. A portfolio-wide exposure cap for every non-locked player.
+    2. A small forced-variation rule so the optimizer does not return
+       the exact same best lineup before anyone reaches the cap.
 
-    for n in range(num_lineups):
+    Example:
+        3 lineups at 66% -> maximum 2 appearances per non-locked player.
+    """
+    num_lineups = int(num_lineups)
+    max_player_exposure = float(max_player_exposure)
+
+    if num_lineups < 1:
+        return pd.DataFrame()
+
+    max_player_exposure = max(1.0, min(100.0, max_player_exposure))
+
+    max_player_count = max(
+        1,
+        math.ceil(num_lineups * max_player_exposure / 100.0),
+    )
+
+    locked_set = {
+        str(player).strip()
+        for player in (locked_players or [])
+        if str(player).strip()
+    }
+
+    base_excludes = {
+        str(player).strip()
+        for player in (excluded_players or [])
+        if str(player).strip()
+    }
+
+    lineups = []
+    previous_lineup_sets = []
+    player_counts = Counter()
+
+    # Persistent diversity exclusions ensure each new lineup must differ.
+    diversity_excludes = set()
+
+    for lineup_index in range(num_lineups):
+        capped_players = {
+            player
+            for player, count in player_counts.items()
+            if count >= max_player_count and player not in locked_set
+        }
+
+        lineup_excludes = sorted(
+            base_excludes | capped_players | diversity_excludes
+        )
+
         lineup, salary, score = build_real_optimizer_lineup(
             hitters,
             pitchers,
             stacks_df,
-            locked_players=locked_players,
-            excluded_players=list(global_excludes),
+            locked_players=sorted(locked_set),
+            excluded_players=lineup_excludes,
             primary_stack=primary_stack,
             secondary_stack=secondary_stack,
-            min_salary=min_salary
+            min_salary=min_salary,
         )
 
         if lineup.empty:
             break
 
-        lineup_players = set(lineup["Player"].astype(str))
+        lineup_players = {
+            str(player).strip()
+            for player in lineup["Player"].dropna().astype(str)
+            if str(player).strip()
+        }
 
-        # Avoid exact duplicate lineups
         if lineup_players in previous_lineup_sets:
             break
 
         lineup = lineup.copy()
-        lineup["Lineup #"] = n + 1
+        lineup["Lineup #"] = lineup_index + 1
         lineups.append(lineup)
         previous_lineup_sets.append(lineup_players)
 
-        # Smarter variation:
-        # Exclude a strong, non-locked hitter from the current lineup,
-        # not the weakest punt.
-        hitters_only = lineup[lineup["Slot"] != "P"].copy()
-        hitters_only = hitters_only[~hitters_only["Player"].astype(str).isin(set(locked_players or []))]
+        for player in lineup_players:
+            player_counts[player] += 1
 
-        if hitters_only.empty:
-            break
+        # Force the next lineup to differ before exposure caps are reached.
+        # Prefer a strong non-locked hitter; if unavailable, use any
+        # non-locked player from the lineup.
+        non_locked = lineup[
+            ~lineup["Player"].astype(str).isin(locked_set)
+        ].copy()
 
-        # Avoid excluding pitchers. Pick from upper-middle hitters to force meaningful variation.
-        hitters_only = hitters_only.sort_values("Score", ascending=False)
+        if not non_locked.empty:
+            hitters_only = non_locked[
+                non_locked["Slot"].astype(str) != "P"
+            ].copy()
 
-        if len(hitters_only) >= 4:
-            player_to_exclude = hitters_only.iloc[2]["Player"]
-        else:
-            player_to_exclude = hitters_only.iloc[0]["Player"]
+            if not hitters_only.empty:
+                hitters_only = hitters_only.sort_values(
+                    "Score",
+                    ascending=False,
+                )
+                pick_index = 2 if len(hitters_only) >= 4 else 0
+                diversity_player = str(
+                    hitters_only.iloc[pick_index]["Player"]
+                ).strip()
+            else:
+                non_locked = non_locked.sort_values(
+                    "Score",
+                    ascending=False,
+                )
+                diversity_player = str(
+                    non_locked.iloc[0]["Player"]
+                ).strip()
 
-        global_excludes.add(str(player_to_exclude))
+            if diversity_player:
+                diversity_excludes.add(diversity_player)
 
     if not lineups:
         return pd.DataFrame()
 
     return pd.concat(lineups, ignore_index=True)
+
 
 def late_swap_optimizer(
     hitters,

@@ -587,6 +587,18 @@ if uploaded_file:
                 step=1,
             )
 
+            max_player_exposure = st.slider(
+                "Maximum Player Exposure (%)",
+                min_value=10,
+                max_value=100,
+                value=66,
+                step=1,
+                help=(
+                    "Maximum percentage of generated lineups "
+                    "a player may appear in."
+                ),
+            )
+
             if st.button("Build Real Optimizer Lineup"):
                 lineup, salary, score = (
                     build_real_optimizer_lineup(
@@ -658,6 +670,7 @@ if uploaded_file:
                 primary_stack=primary_stack,
                 secondary_stack=secondary_stack,
                 min_salary=min_salary,
+                max_player_exposure=max_player_exposure,
             )
 
             if multi.empty:
