@@ -28,6 +28,7 @@ from model import (
 from projection_store import load_projection_file, save_projection_file
 from render import render_lineup
 from slate_dashboard import render_slate_control_center
+from performance_center import render_performance_center
 
 
 DK_SALARY_CAP = 50000
@@ -378,6 +379,7 @@ def render_working_lineup_save_controls():
     tab_builder,
     tab_review,
     tab_health,
+    tab_performance,
 ) = st.tabs(
     [
         "Pitchers",
@@ -386,6 +388,7 @@ def render_working_lineup_save_controls():
         "Lineup Builder",
         "Contest Review",
         "Health Check",
+        "📊 Performance",
     ]
 )
 
@@ -984,3 +987,6 @@ else:
         st.info(
             "Upload projections to run health check."
         )
+
+with tab_performance:
+    render_performance_center()
