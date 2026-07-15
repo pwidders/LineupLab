@@ -1,8 +1,11 @@
 import hashlib
+import re
 from datetime import datetime, date
 
 import pandas as pd
 import streamlit as st
+
+from contest_history_store import save_contest_history
 
 
 DEFAULT_ENTRY_NAME = "rentisdue"
@@ -48,6 +51,25 @@ def make_lineup_id(lineup_text):
     return hashlib.md5(cleaned.encode("utf-8")).hexdigest()[:10]
 
 
+
+
+def parse_lineup_players(lineup_text):
+    text = str(lineup_text).strip()
+    if not text:
+        return []
+
+    pattern = re.compile(
+        r"(?:^|\s)(P|C|1B|2B|3B|SS|OF)\s+"
+        r"(.+?)"
+        r"(?=\s+(?:P|C|1B|2B|3B|SS|OF)\s+|$)"
+    )
+
+    return [
+        match.group(2).strip()
+        for match in pattern.finditer(text)
+        if match.group(2).strip()
+    ]
+
 def infer_contest_type(field_size):
     if field_size and field_size < DOUBLE_UP_FIELD_SIZE_CUTOFF:
         return "Double-Up"
@@ -89,7 +111,7 @@ def render_single_contest(file, file_index, slate_date):
         return None
 
     standings = df[df[entry_col].notna()].copy()
-    player_rows = df[df[player_col].notna()].copy()
+    all_player_rows = df[df[player_col].notna()].copy()
 
     if standings.empty:
         st.warning(f"No standings rows found in {file.name}.")
@@ -127,6 +149,33 @@ def render_single_contest(file, file_index, slate_date):
         help="Auto-suggested from field size. Less than 100 entries defaults to Double-Up.",
     )
 
+    money_col1, money_col2, money_col3 = st.columns(3)
+
+    with money_col1:
+        entry_fee = st.number_input(
+            "Entry fee",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            format="%.2f",
+            key=f"entry_fee_{file_index}_{file.name}",
+        )
+
+    with money_col2:
+        winnings = st.number_input(
+            "Winnings",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            format="%.2f",
+            key=f"winnings_{file_index}_{file.name}",
+        )
+
+    profit = float(winnings) - float(entry_fee)
+
+    with money_col3:
+        st.metric("Profit", f"${profit:,.2f}")
+
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Entry", selected_entry)
     col2.metric("Contest Type", contest_type)
@@ -138,10 +187,33 @@ def render_single_contest(file, file_index, slate_date):
     st.write(lineup_text)
     st.caption(f"Lineup ID: {lineup_id}")
 
+    lineup_players = parse_lineup_players(lineup_text)
+    lineup_player_set = {name.strip().lower() for name in lineup_players}
+
+    player_rows = all_player_rows[
+        all_player_rows[player_col]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .isin(lineup_player_set)
+    ].copy()
+
+    if player_rows.empty:
+        st.warning(
+            "Could not match the lineup players to the player-results rows. "
+            "Showing the full contest player pool for review."
+        )
+        player_rows = all_player_rows.copy()
+    elif len(player_rows) != 10:
+        st.warning(
+            f"Matched {len(player_rows)} of 10 lineup players. "
+            "Review the lineup table before saving."
+        )
+
     player_rows["Ownership %"] = player_rows[drafted_col].apply(parse_percent)
     player_rows["FPTS"] = pd.to_numeric(player_rows[fpts_col], errors="coerce").fillna(0)
 
-    st.markdown("### Player Ownership / Results")
+    st.markdown("### Your Lineup — Ownership / Results")
     visible = player_rows[[player_col, roster_col, "Ownership %", "FPTS"]].copy()
     visible.columns = ["Player", "Roster Position", "Ownership %", "FPTS"]
     st.dataframe(visible.sort_values("Ownership %", ascending=False), use_container_width=True)
@@ -175,6 +247,9 @@ def render_single_contest(file, file_index, slate_date):
                 "Worst Player": worst_player,
                 "Lineup ID": lineup_id,
                 "Lineup": lineup_text,
+                "Entry Fee": float(entry_fee),
+                "Winnings": float(winnings),
+                "Profit": profit,
             }
         ]
     )
@@ -196,6 +271,14 @@ def render_single_contest(file, file_index, slate_date):
 def render_contest_logger():
     st.subheader("Contest Stat Collector")
 
+    save_notice = st.session_state.pop(
+        "contest_history_save_notice",
+        None,
+    )
+
+    if save_notice:
+        st.success(save_notice)
+
     slate_date = st.date_input(
         "Slate date",
         value=date.today(),
@@ -205,7 +288,7 @@ def render_contest_logger():
     uploaded_files = st.file_uploader(
         "Upload DraftKings contest standings CSV",
         type=["csv"],
-        key="contest_csv_upload",
+        key="contest_standings_csv_uploader",
         accept_multiple_files=True,
     )
 
@@ -233,6 +316,39 @@ def render_contest_logger():
             st.info(
                 "Duplicate lineup detected across contest files. This is expected when you enter the same lineup in both a double-up and a GPP. They are still logged as separate contest results."
             )
+
+        total_fee = float(combined["Entry Fee"].sum())
+        total_winnings = float(combined["Winnings"].sum())
+        total_profit = float(combined["Profit"].sum())
+
+        summary_col1, summary_col2, summary_col3 = st.columns(3)
+        summary_col1.metric("Total Entry Fees", f"${total_fee:,.2f}")
+        summary_col2.metric("Total Winnings", f"${total_winnings:,.2f}")
+        summary_col3.metric("Total Profit", f"${total_profit:,.2f}")
+
+        if st.button(
+            "💾 Save Contest History",
+            key="save_contest_history",
+            type="primary",
+        ):
+            try:
+                inserted, skipped = save_contest_history(combined)
+
+                message = f"Saved {inserted} contest result(s) ✅"
+
+                if skipped:
+                    message += (
+                        f" Skipped {skipped} duplicate result(s)."
+                    )
+
+                st.session_state[
+                    "contest_history_save_notice"
+                ] = message
+
+                st.rerun()
+
+            except Exception as exc:
+                st.error(f"Could not save contest history: {exc}")
 
         st.download_button(
             "Download Combined Contest Log",
