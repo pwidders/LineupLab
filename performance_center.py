@@ -57,6 +57,45 @@ def calculate_overall_metrics(history: pd.DataFrame) -> dict:
         ),
     }
 
+def build_slate_history(history: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregate contest history into one row per slate.
+
+    This becomes the foundation for all drill-down analytics.
+    """
+
+    if history.empty:
+        return pd.DataFrame()
+
+    grouped = (
+        history.groupby("slate_date", as_index=False)
+        .agg(
+            contests=("entry_name", "count"),
+            total_fees=("entry_fee", "sum"),
+            total_winnings=("winnings", "sum"),
+            average_points=("points", "mean"),
+        )
+    )
+
+    grouped["profit"] = (
+        grouped["total_winnings"] - grouped["total_fees"]
+    )
+
+    grouped["roi"] = grouped.apply(
+        lambda row:
+            row["profit"] / row["total_fees"]
+            if row["total_fees"] > 0
+            else 0,
+        axis=1,
+    )
+
+    grouped = grouped.sort_values(
+        "slate_date",
+        ascending=False,
+    )
+
+    return grouped
+
 
 def format_profit(value: float) -> str:
     if value > 0:
@@ -140,6 +179,125 @@ def render_performance_center():
 
     st.subheader("Slate History")
 
-    st.caption(
-        "Slate-level results will be added in the next step."
+    slates = build_slate_history(history)
+
+    if slates.empty:
+
+        st.info("No slates found.")
+
+    else:
+
+        display = slates.copy()
+
+        display["total_fees"] = display["total_fees"].map(
+            lambda x: f"${x:.2f}"
+        )
+
+        display["total_winnings"] = display["total_winnings"].map(
+            lambda x: f"${x:.2f}"
+        )
+
+        display["profit"] = display["profit"].map(
+            format_profit
+        )
+
+        display["roi"] = display["roi"].map(
+            lambda x: f"{x:.1%}"
+        )
+
+        display["average_points"] = display["average_points"].round(2)
+
+        display["slate_date"] = pd.to_datetime(
+            display["slate_date"]
+        ).dt.strftime("%Y-%m-%d")
+
+        display = display.rename(
+            columns={
+                "slate_date": "Slate Date",
+                "contests": "Contests",
+                "total_fees": "Total Fees",
+                "total_winnings": "Total Winnings",
+                "average_points": "Average Points",
+                "profit": "Profit",
+                "roi": "ROI",
+            }
+        )
+
+    st.dataframe(
+        display,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.markdown("### Slate Details")
+
+    slate_options = (
+        slates["slate_date"]
+        .dropna()
+        .sort_values(ascending=False)
+        .dt.strftime("%Y-%m-%d")
+        .tolist()
+    )
+
+    selected_slate = st.selectbox(
+        "Select a slate",
+        options=slate_options,
+        key="performance_selected_slate",
+    )
+
+    selected_date = pd.to_datetime(selected_slate).date()
+
+    slate_contests = history[
+        history["slate_date"].dt.date == selected_date
+    ].copy()
+
+    contest_display = slate_contests.copy()
+
+    contest_display["Finish"] = (
+        contest_display["rank"].astype(int).astype(str)
+        + " / "
+        + contest_display["field_size"].astype(int).astype(str)
+    )
+
+    contest_display["entry_fee"] = contest_display["entry_fee"].map(
+        lambda x: f"${x:.2f}"
+    )
+
+    contest_display["winnings"] = contest_display["winnings"].map(
+        lambda x: f"${x:.2f}"
+    )
+
+    contest_display["profit"] = contest_display["profit"].map(
+        format_profit
+    )
+
+    contest_display["points"] = contest_display["points"].map(
+        lambda x: f"{x:.2f}"
+    )
+
+    contest_display = contest_display[
+        [
+            "contest_type",
+            "entry_name",
+            "Finish",
+            "points",
+            "entry_fee",
+            "winnings",
+            "profit",
+        ]
+    ].rename(
+        columns={
+            "contest_type": "Contest",
+            "entry_name": "Entry",
+            "points": "DK Points",
+            "entry_fee": "Fee",
+            "winnings": "Winnings",
+            "profit": "Profit",
+        }
+    )
+
+    st.dataframe(
+        contest_display,
+        use_container_width=True,
+        hide_index=True,
     )
