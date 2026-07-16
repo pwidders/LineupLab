@@ -97,6 +97,81 @@ def build_slate_history(history: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
+def build_player_history(history: pd.DataFrame) -> pd.DataFrame:
+    """
+    Flatten player_results JSON from contest history into
+    one row per player appearance.
+    """
+
+    if history.empty or "player_results" not in history.columns:
+        return pd.DataFrame()
+
+    player_rows = []
+
+    for _, contest in history.iterrows():
+        results = contest.get("player_results")
+
+        if not isinstance(results, list):
+            continue
+
+        for player in results:
+            if not isinstance(player, dict):
+                continue
+
+            player_rows.append(
+                {
+                    "player": player.get("player", ""),
+                    "roster_position": player.get(
+                        "roster_position",
+                        "",
+                    ),
+                    "ownership": player.get("ownership", 0),
+                    "fpts": player.get("fpts", 0),
+                    "slate_date": contest.get("slate_date"),
+                    "contest_type": contest.get("contest_type"),
+                    "entry_fee": contest.get("entry_fee", 0),
+                    "winnings": contest.get("winnings", 0),
+                    "profit": contest.get("profit", 0),
+                    "lineup_id": contest.get("lineup_id"),
+                }
+            )
+
+    if not player_rows:
+        return pd.DataFrame()
+
+    players = pd.DataFrame(player_rows)
+
+    players["ownership"] = pd.to_numeric(
+        players["ownership"],
+        errors="coerce",
+    ).fillna(0)
+
+    players["fpts"] = pd.to_numeric(
+        players["fpts"],
+        errors="coerce",
+    ).fillna(0)
+
+    players["player_key"] = (
+        players["player"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+    )
+
+    players = players.drop_duplicates(
+        subset=[
+            "slate_date",
+            "contest_type",
+            "lineup_id",
+            "player_key",
+        ],
+        keep="first",
+    )
+
+    players = players.drop(columns=["player_key"])
+
+    return players
+
 def format_profit(value: float) -> str:
     if value > 0:
         return f"+${value:,.2f}"
@@ -301,3 +376,116 @@ def render_performance_center():
         use_container_width=True,
         hide_index=True,
     )
+
+    st.divider()
+
+    st.subheader("Player Analytics")
+
+    players = build_player_history(history)
+
+    if players.empty:
+        st.info(
+            "Player analytics will appear after contests "
+            "with player-results data are saved."
+        )
+        return
+
+    player_summary = (
+        players.groupby("player", as_index=False)
+        .agg(
+            times_used=("player", "size"),
+            average_fpts=("fpts", "mean"),
+            average_ownership=("ownership", "mean"),
+        )
+    )
+
+    player_summary = player_summary[
+        player_summary["player"].astype(str).str.strip() != ""
+    ]
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("#### Most Used Players")
+
+        most_used = (
+            player_summary.sort_values(
+                ["times_used", "average_fpts"],
+                ascending=[False, False],
+            )
+            .head(10)
+            .rename(
+                columns={
+                    "player": "Player",
+                    "times_used": "Uses",
+                }
+            )
+        )
+
+        st.dataframe(
+            most_used[["Player", "Uses"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with col2:
+        st.markdown("#### Highest Average DK Points")
+
+        best_fpts = (
+            player_summary.sort_values(
+                "average_fpts",
+                ascending=False,
+            )
+            .head(10)
+            .copy()
+        )
+
+        best_fpts["average_fpts"] = (
+            best_fpts["average_fpts"].round(2)
+        )
+
+        best_fpts = best_fpts.rename(
+            columns={
+                "player": "Player",
+                "average_fpts": "Avg DK Points",
+            }
+        )
+
+        st.dataframe(
+            best_fpts[["Player", "Avg DK Points"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with col3:
+        st.markdown("#### Highest Average Ownership")
+
+        highest_owned = (
+            player_summary.sort_values(
+                "average_ownership",
+                ascending=False,
+            )
+            .head(10)
+            .copy()
+        )
+
+        highest_owned["average_ownership"] = (
+            highest_owned["average_ownership"].map(
+                lambda value: f"{value:.1f}%"
+            )
+        )
+
+        highest_owned = highest_owned.rename(
+            columns={
+                "player": "Player",
+                "average_ownership": "Avg Ownership",
+            }
+        )
+
+        st.dataframe(
+            highest_owned[
+                ["Player", "Avg Ownership"]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
