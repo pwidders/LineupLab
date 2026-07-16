@@ -219,16 +219,16 @@ def render_single_contest(file, file_index, slate_date):
     st.dataframe(visible.sort_values("Ownership %", ascending=False), use_container_width=True)
 
     player_results = (
-    visible.rename(
-        columns={
-            "Player": "player",
-            "Roster Position": "roster_position",
-            "Ownership %": "ownership",
-            "FPTS": "fpts",
-        }
+        visible.rename(
+            columns={
+                "Player": "player",
+                "Roster Position": "roster_position",
+                "Ownership %": "ownership",
+                "FPTS": "fpts",
+            }
+        )
+        .to_dict(orient="records")
     )
-    .to_dict(orient="records")
-)
 
     avg_ownership = player_rows["Ownership %"].mean()
     total_player_fpts = player_rows["FPTS"].sum()
