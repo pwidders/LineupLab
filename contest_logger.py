@@ -218,6 +218,18 @@ def render_single_contest(file, file_index, slate_date):
     visible.columns = ["Player", "Roster Position", "Ownership %", "FPTS"]
     st.dataframe(visible.sort_values("Ownership %", ascending=False), use_container_width=True)
 
+    player_results = (
+    visible.rename(
+        columns={
+            "Player": "player",
+            "Roster Position": "roster_position",
+            "Ownership %": "ownership",
+            "FPTS": "fpts",
+        }
+    )
+    .to_dict(orient="records")
+)
+
     avg_ownership = player_rows["Ownership %"].mean()
     total_player_fpts = player_rows["FPTS"].sum()
 
@@ -250,6 +262,7 @@ def render_single_contest(file, file_index, slate_date):
                 "Entry Fee": float(entry_fee),
                 "Winnings": float(winnings),
                 "Profit": profit,
+                "Player Results": player_results,
             }
         ]
     )

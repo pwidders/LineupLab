@@ -46,6 +46,7 @@ def _row_to_record(row: pd.Series) -> dict:
         "Entry Fee": "entry_fee",
         "Winnings": "winnings",
         "Profit": "profit",
+        "Player Results": "player_results",
     }
 
     return {
