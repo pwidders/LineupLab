@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 WORKING_LINEUP_KEY = "current_lineup"
 WORKING_SALARY_KEY = "current_salary"
@@ -14,8 +15,10 @@ def set_working_lineup(lineup: pd.DataFrame, salary: float, score: float) -> Non
 
     st.session_state[WORKING_LINEUP_KEY] = lineup.copy()
     st.session_state[WORKING_SALARY_KEY] = float(salary)
-    st.session_state[WORKING_SCORE_KEY] = float(score)
-    st.session_state[WORKING_UPDATED_KEY] = datetime.now().strftime("%I:%M %p")
+    st.session_state[WORKING_UPDATED_KEY] = (
+        datetime.now(ZoneInfo("America/Los_Angeles"))
+        .strftime("%b %d • %I:%M %p")
+    )
 
 
 def has_working_lineup() -> bool:
