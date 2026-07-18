@@ -8,6 +8,7 @@ from cloud_lineup_store import (
     list_cloud_lineups,
     load_cloud_lineup,
     save_cloud_lineup,
+    load_cloud_working_lineup,
 )
 from contest_logger import render_contest_logger
 from data_loader import load_excel
@@ -92,6 +93,41 @@ vault_lineup_slot = st.sidebar.number_input(
 
 vault_slate_date_str = vault_slate_date.isoformat()
 vault_slate_name = vault_slate_name.strip() or "Main"
+
+# ----------------------------------------------------------
+# Restore today's cloud working lineup (once per slate)
+# ----------------------------------------------------------
+
+restore_key = f"{vault_slate_date_str}_{vault_slate_name}"
+
+if (
+    st.session_state.get("restored_working_lineup_key")
+    != restore_key
+):
+    try:
+        working = load_cloud_working_lineup(
+            vault_slate_date_str,
+            vault_slate_name,
+        )
+
+        if working is not None:
+            lineup, salary, score, record = working
+
+            set_working_lineup(
+                lineup,
+                salary,
+                score,
+            )
+
+            st.session_state["working_lineup_notice"] = (
+                f"Restored Working Lineup "
+                f"({record.get('last_action','Unknown')}) ☁️"
+            )
+
+    except Exception as exc:
+        print(f"Working lineup restore failed: {exc}")
+
+    st.session_state["restored_working_lineup_key"] = restore_key
 
 
 try:
