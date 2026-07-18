@@ -14,8 +14,11 @@ from data_loader import load_excel
 from late_swap import render_late_swap_assistant
 from lineup_manager import (
     clear_working_lineup,
+    configure_working_lineup_cloud,
     get_working_lineup,
+    get_working_lineup_status,
     has_working_lineup,
+    restore_working_lineup_from_cloud,
     set_working_lineup,
 )
 from model import (
@@ -66,18 +69,9 @@ vault_slate_name = st.sidebar.text_input(
 )
 
 def handle_vault_slot_change():
-    # Changing slots starts a fresh working context.
-    clear_working_lineup()
-
-    st.session_state.pop(
-        "active_cloud_lineup_slot",
-        None,
-    )
-
-    st.session_state.pop(
-        "working_lineup_notice",
-        None,
-    )
+    # Vault selection does not erase the live working lineup.
+    st.session_state.pop("active_cloud_lineup_slot", None)
+    st.session_state.pop("working_lineup_notice", None)
 
 
 vault_lineup_slot = st.sidebar.number_input(
@@ -92,6 +86,46 @@ vault_lineup_slot = st.sidebar.number_input(
 
 vault_slate_date_str = vault_slate_date.isoformat()
 vault_slate_name = vault_slate_name.strip() or "Main"
+
+new_working_context = f"{vault_slate_date_str}|{vault_slate_name}"
+previous_working_context = st.session_state.get(
+    "active_working_lineup_context"
+)
+if (
+    previous_working_context
+    and previous_working_context != new_working_context
+):
+    clear_working_lineup(clear_cloud=False)
+st.session_state["active_working_lineup_context"] = (
+    new_working_context
+)
+
+configure_working_lineup_cloud(
+    vault_slate_date_str,
+    vault_slate_name,
+)
+
+working_restore_key = (
+    f"{vault_slate_date_str}|{vault_slate_name}"
+)
+if (
+    st.session_state.get("working_lineup_restore_checked")
+    != working_restore_key
+):
+    st.session_state["working_lineup_restore_checked"] = (
+        working_restore_key
+    )
+    if not has_working_lineup():
+        try:
+            if restore_working_lineup_from_cloud(
+                vault_slate_date_str,
+                vault_slate_name,
+            ):
+                st.session_state["working_lineup_notice"] = (
+                    "Today's Working Lineup was restored from the cloud ✅"
+                )
+        except Exception as exc:
+            st.session_state["working_lineup_restore_error"] = str(exc)
 
 
 try:
@@ -152,6 +186,7 @@ with vault_col1:
                 cloud_lineup,
                 cloud_salary,
                 cloud_score,
+                last_action="Loaded from Vault",
             )
 
             st.session_state["active_cloud_lineup_slot"] = int(
@@ -191,6 +226,15 @@ with vault_col2:
 
         except Exception as exc:
             st.sidebar.error(f"Delete failed: {exc}")
+
+restore_error = st.session_state.pop(
+    "working_lineup_restore_error",
+    None,
+)
+if restore_error:
+    st.sidebar.warning(
+        f"Could not restore cloud working lineup: {restore_error}"
+    )
 
 st.sidebar.divider()
 
@@ -299,7 +343,24 @@ def render_working_lineup_card():
         f"⭐ Current Working Lineup{slot_label}",
         expanded=True,
     ):
+        sync_status, last_action, sync_error = (
+            get_working_lineup_status()
+        )
+        if sync_status == "synced":
+            st.success("☁️ Synced to Cloud")
+        elif sync_status == "saving":
+            st.info("☁️ Saving...")
+        elif sync_status == "error":
+            st.warning(
+                "Working lineup is saved on this device, but cloud sync failed."
+            )
+            if sync_error:
+                st.caption(sync_error)
+        else:
+            st.caption("Saved in this browser session only")
+
         st.write(f"Updated at: **{updated_at}**")
+        st.write(f"Last action: **{last_action}**")
         st.write(f"Salary: **${working_salary:,.0f}**")
         st.write(f"Projection: **{working_score:.1f} pts**")
 
@@ -313,9 +374,15 @@ def render_working_lineup_card():
             "🗑 Clear Current Working Lineup",
             key="clear_current_working_lineup",
         ):
-            clear_working_lineup()
-            st.session_state.pop("active_cloud_lineup_slot", None)
-            st.rerun()
+            try:
+                clear_working_lineup(clear_cloud=True)
+                st.session_state.pop("active_cloud_lineup_slot", None)
+                st.session_state["working_lineup_notice"] = (
+                    "Working lineup cleared locally and from the cloud."
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Could not clear cloud working lineup: {exc}")
 
 
 def render_working_lineup_save_controls():
@@ -666,6 +733,7 @@ if uploaded_file:
                         lineup,
                         salary,
                         score,
+                        last_action="Optimizer Build",
                     )
                     st.session_state["working_lineup_notice"] = (
                         "Optimizer lineup is now the Current Working Lineup ✅"
@@ -851,6 +919,7 @@ if uploaded_file:
                         lineup_info["lineup"],
                         lineup_info["salary"],
                         lineup_info["score"],
+                        last_action=f"Generated Lineup {lineup_num}",
                     )
                     st.session_state["working_lineup_notice"] = (
                         f"Generated Lineup {lineup_num} is now the "
