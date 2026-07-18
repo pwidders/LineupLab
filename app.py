@@ -218,17 +218,21 @@ if uploaded_file and st.sidebar.button("💾 Save Uploaded Sheet"):
     except Exception as exc:
         st.sidebar.error(f"Save failed: {exc}")
 
-if st.sidebar.button("📲 Load Latest Saved Sheet"):
+if st.sidebar.button("📚 Load Latest Saved Sheet"):
+    st.session_state.pop(
+        "_loaded_slate_settings_key",
+        None,
+    )
+
     try:
         saved_bytes = load_projection_file()
-
 
         st.session_state["saved_projection_bytes"] = saved_bytes
         st.session_state["active_projection_bytes"] = saved_bytes
         st.session_state["active_projection_name"] = (
             "latest_projection_sheet.xlsx"
         )
-        
+
         st.sidebar.success("Loaded latest saved sheet.")
     except Exception as exc:
         st.sidebar.error(f"Load failed: {exc}")
