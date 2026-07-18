@@ -7,11 +7,15 @@ from projection_store import get_supabase_client
 
 
 TABLE_NAME = "saved_lineups"
-WORKING_TABLE_NAME = "working_lineups"
 
 
 def _lineup_to_json(lineup: pd.DataFrame) -> list[dict]:
-    """Convert a lineup DataFrame into Supabase-safe JSON records."""
+    """
+    Convert the lineup DataFrame into JSON-safe Python objects.
+
+    Using DataFrame.to_json avoids issues with NumPy numeric types
+    that Supabase cannot serialize directly.
+    """
     if lineup is None or lineup.empty:
         raise ValueError("Cannot save an empty lineup.")
 
@@ -32,7 +36,10 @@ def save_cloud_lineup(
     lineup_slot: int,
     lineup_name: str | None = None,
 ) -> dict:
-    """Create or overwrite one permanent Vault slot for a slate."""
+    """
+    Create or overwrite one lineup slot for a specific slate.
+    """
+
     slate_name = str(slate_name).strip() or "Main"
     lineup_slot = int(lineup_slot)
 
@@ -55,6 +62,7 @@ def save_cloud_lineup(
     }
 
     supabase = get_supabase_client()
+
     response = (
         supabase.table(TABLE_NAME)
         .upsert(
@@ -70,9 +78,16 @@ def save_cloud_lineup(
     return response.data[0]
 
 
-def list_cloud_lineups(slate_date: str, slate_name: str) -> list[dict]:
-    """Return all permanent Vault lineup slots for one slate."""
+def list_cloud_lineups(
+    slate_date: str,
+    slate_name: str,
+) -> list[dict]:
+    """
+    Return all saved lineup slots for one slate.
+    """
+
     supabase = get_supabase_client()
+
     response = (
         supabase.table(TABLE_NAME)
         .select(
@@ -84,6 +99,7 @@ def list_cloud_lineups(slate_date: str, slate_name: str) -> list[dict]:
         .order("lineup_slot")
         .execute()
     )
+
     return response.data or []
 
 
@@ -92,8 +108,12 @@ def load_cloud_lineup(
     slate_name: str,
     lineup_slot: int,
 ) -> tuple[pd.DataFrame, float, float, dict]:
-    """Load one permanent Vault lineup slot from Supabase."""
+    """
+    Load one saved lineup slot from Supabase.
+    """
+
     supabase = get_supabase_client()
+
     response = (
         supabase.table(TABLE_NAME)
         .select("*")
@@ -112,6 +132,7 @@ def load_cloud_lineup(
 
     record = response.data[0]
     lineup = pd.DataFrame(record["lineup_data"])
+
     return (
         lineup,
         float(record.get("salary", 0)),
@@ -125,92 +146,17 @@ def delete_cloud_lineup(
     slate_name: str,
     lineup_slot: int,
 ) -> None:
-    """Delete one permanent Vault slot."""
+    """
+    Delete one lineup slot without affecting the other saved lineups.
+    """
+
     supabase = get_supabase_client()
+
     (
         supabase.table(TABLE_NAME)
         .delete()
         .eq("slate_date", str(slate_date))
         .eq("slate_name", str(slate_name).strip() or "Main")
         .eq("lineup_slot", int(lineup_slot))
-        .execute()
-    )
-
-
-# -------------------------------------------------------------------
-# Live working lineup cloud storage
-# -------------------------------------------------------------------
-
-def save_cloud_working_lineup(
-    lineup: pd.DataFrame,
-    salary: float,
-    projected_score: float,
-    slate_date: str,
-    slate_name: str,
-    last_action: str = "Working Lineup Update",
-) -> dict:
-    """Upsert the single live working lineup for a slate."""
-    slate_name = str(slate_name).strip() or "Main"
-    payload = {
-        "slate_date": str(slate_date),
-        "slate_name": slate_name,
-        "salary": float(salary),
-        "projected_score": float(projected_score),
-        "lineup_data": _lineup_to_json(lineup),
-        "last_action": str(last_action).strip() or "Working Lineup Update",
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    supabase = get_supabase_client()
-    response = (
-        supabase.table(WORKING_TABLE_NAME)
-        .upsert(payload, on_conflict="slate_date,slate_name")
-        .execute()
-    )
-
-    if not response.data:
-        raise RuntimeError("Supabase did not return the working lineup.")
-
-    return response.data[0]
-
-
-def load_cloud_working_lineup(
-    slate_date: str,
-    slate_name: str,
-) -> tuple[pd.DataFrame, float, float, dict]:
-    """Load the live working lineup for a slate."""
-    supabase = get_supabase_client()
-    response = (
-        supabase.table(WORKING_TABLE_NAME)
-        .select("*")
-        .eq("slate_date", str(slate_date))
-        .eq("slate_name", str(slate_name).strip() or "Main")
-        .limit(1)
-        .execute()
-    )
-
-    if not response.data:
-        raise FileNotFoundError(
-            f"No working lineup was found for {slate_date} {slate_name}."
-        )
-
-    record = response.data[0]
-    lineup = pd.DataFrame(record["lineup_data"])
-    return (
-        lineup,
-        float(record.get("salary", 0)),
-        float(record.get("projected_score", 0)),
-        record,
-    )
-
-
-def delete_cloud_working_lineup(slate_date: str, slate_name: str) -> None:
-    """Delete the live working lineup for a slate."""
-    supabase = get_supabase_client()
-    (
-        supabase.table(WORKING_TABLE_NAME)
-        .delete()
-        .eq("slate_date", str(slate_date))
-        .eq("slate_name", str(slate_name).strip() or "Main")
         .execute()
     )
