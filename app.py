@@ -152,6 +152,9 @@ with vault_col1:
                 cloud_lineup,
                 cloud_salary,
                 cloud_score,
+                slate_date=vault_slate_date_str,
+                slate_name=vault_slate_name,
+                last_action="Loaded From Vault",
             )
 
             st.session_state["active_cloud_lineup_slot"] = int(
@@ -666,6 +669,9 @@ if uploaded_file:
                         lineup,
                         salary,
                         score,
+                        slate_date=vault_slate_date_str,
+                        slate_name=vault_slate_name,
+                        last_action="Optimizer Build",
                     )
                     st.session_state["working_lineup_notice"] = (
                         "Optimizer lineup is now the Current Working Lineup ✅"
@@ -851,6 +857,9 @@ if uploaded_file:
                         lineup_info["lineup"],
                         lineup_info["salary"],
                         lineup_info["score"],
+                        slate_date=vault_slate_date_str,
+                        slate_name=vault_slate_name,
+                        last_action=f"Generated Lineup {lineup_num}",
                     )
                     st.session_state["working_lineup_notice"] = (
                         f"Generated Lineup {lineup_num} is now the "
