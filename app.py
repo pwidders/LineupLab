@@ -29,6 +29,10 @@ from projection_store import load_projection_file, save_projection_file
 from render import render_lineup
 from slate_dashboard import render_slate_control_center
 from performance_center import render_performance_center
+from slate_settings_store import (
+    initialize_slate_settings,
+    persist_slate_settings,
+)
 
 
 DK_SALARY_CAP = 50000
@@ -88,6 +92,7 @@ vault_lineup_slot = st.sidebar.number_input(
 
 vault_slate_date_str = vault_slate_date.isoformat()
 vault_slate_name = vault_slate_name.strip() or "Main"
+
 
 try:
     saved_vault_lineups = list_cloud_lineups(
@@ -439,27 +444,37 @@ if uploaded_file:
         )
     )
 
+    initialize_slate_settings(
+        slate_date=vault_slate_date_str,
+        slate_name=vault_slate_name,
+        all_players=all_players,
+        all_teams=all_teams,
+    )
+
     with tab_builder:
         st.subheader("Lineup Builder")
 
         locked_players = st.multiselect(
             "Lock players",
             options=all_players,
+            key="locked_players",
             help="Optimizer must include these players.",
         )
 
         excluded_players = st.multiselect(
             "Exclude players",
             options=all_players,
+            key="excluded_players",
             help="Optimizer cannot include these players.",
         )
 
         weather_risk_teams = st.multiselect(
             "Exclude teams due to weather, or lock",
             options=all_teams,
+            key="weather_risk_teams",
             help=(
                 "Removes all hitters and pitchers from "
-                "selected weather-risk teams."
+                "selected weather-risk or locked teams."
             ),
         )
 
@@ -468,11 +483,22 @@ if uploaded_file:
         unavailable_players = st.multiselect(
             "Select unavailable players",
             options=all_players,
+            key="unavailable_players",
             help=(
                 "Tap players to remove them from "
                 "the player pool."
             ),
         )
+
+        try:
+            persist_slate_settings(
+                slate_date=vault_slate_date_str,
+                slate_name=vault_slate_name,
+            )
+        except Exception as exc:
+            st.warning(
+                f"Could not save slate settings: {exc}"
+            )
 
         with st.expander(
             "Or paste player names (desktop)"
