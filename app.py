@@ -33,9 +33,16 @@ from performance_center import render_performance_center
 
 DK_SALARY_CAP = 50000
 
-st.set_page_config(page_title="LineupLab", layout="wide")
-st.title("⚾ LineupLab")
-st.caption("MLB DFS Optimizer")
+st.set_page_config(
+    page_title="LineupLab Baseball",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+st.image(
+    "assets/lineuplab_baseball_logo.png",
+    width=450,
+)
 
 
 # -------------------------------------------------------------------
