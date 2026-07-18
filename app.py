@@ -455,7 +455,7 @@ if uploaded_file:
         )
 
         weather_risk_teams = st.multiselect(
-            "Exclude teams due to weather",
+            "Exclude teams due to weather, or lock",
             options=all_teams,
             help=(
                 "Removes all hitters and pitchers from "
