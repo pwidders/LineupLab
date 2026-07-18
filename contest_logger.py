@@ -86,6 +86,7 @@ def render_single_contest(file, file_index, slate_date):
     df.columns = [clean_col_name(c) for c in df.columns]
 
     entry_col = find_col(df, ["EntryName", "Entry Name"])
+    entry_id_col = find_col(df, ["EntryId", "Entry ID"])
     rank_col = find_col(df, ["Rank", "Place"])
     points_col = find_col(df, ["Points", "FPTS", "Fantasy Points"])
     lineup_col = find_col(df, ["Lineup"])
@@ -95,6 +96,7 @@ def render_single_contest(file, file_index, slate_date):
     fpts_col = find_col(df, ["FPTS", "Fantasy Points", "Points"])
 
     required = {
+        "EntryId": entry_id_col,
         "EntryName": entry_col,
         "Rank": rank_col,
         "Points": points_col,
@@ -132,6 +134,7 @@ def render_single_contest(file, file_index, slate_date):
     )
 
     my_row = standings[standings[entry_col].astype(str) == selected_entry].iloc[0]
+    entry_id = int(safe_num(my_row[entry_id_col], 0))
 
     rank = int(safe_num(my_row[rank_col], 0))
     field_size = int(pd.to_numeric(standings[rank_col], errors="coerce").max())
@@ -247,6 +250,7 @@ def render_single_contest(file, file_index, slate_date):
                 "Slate Date": slate_date.strftime("%Y-%m-%d"),
                 "Logged At": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "Source File": file.name,
+                "Entry ID": entry_id,
                 "Entry Name": selected_entry,
                 "Contest Type": contest_type,
                 "Rank": rank,
@@ -345,14 +349,26 @@ def render_contest_logger():
             type="primary",
         ):
             try:
-                inserted, skipped = save_contest_history(combined)
+                inserted, updated = save_contest_history(combined)
 
-                message = f"Saved {inserted} contest result(s) ✅"
+                message_parts = []
 
-                if skipped:
-                    message += (
-                        f" Skipped {skipped} duplicate result(s)."
+                if inserted:
+                    message_parts.append(
+                        f"Saved {inserted} new contest result(s) ✅"
                     )
+
+                if updated:
+                    message_parts.append(
+                        f"Updated {updated} existing contest result(s) 🔄"
+                    )
+
+                if not message_parts:
+                    message_parts.append(
+                        "No contest results were changed."
+                    )
+
+                message = " ".join(message_parts)
 
                 st.session_state[
                     "contest_history_save_notice"

@@ -31,6 +31,7 @@ def _row_to_record(row: pd.Series) -> dict:
         "Slate Date": "slate_date",
         "Logged At": "logged_at",
         "Source File": "source_file",
+        "Entry ID": "entry_id",
         "Entry Name": "entry_name",
         "Contest Type": "contest_type",
         "Rank": "rank",
@@ -55,37 +56,70 @@ def _row_to_record(row: pd.Series) -> dict:
     }
 
 
-def save_contest_history(history_df: pd.DataFrame) -> Tuple[int, int]:
+def save_contest_history(
+    history_df: pd.DataFrame,
+) -> Tuple[int, int]:
+    """
+    Insert new contest records and update matching existing records.
+
+    Returns:
+        inserted: Number of new rows created.
+        updated: Number of existing rows updated.
+    """
     if history_df is None or history_df.empty:
         return 0, 0
 
     client = _get_client()
     inserted = 0
-    skipped = 0
+    updated = 0
 
     for _, row in history_df.iterrows():
         record = _row_to_record(row)
 
-        duplicate_query = (
-            client.table(TABLE_NAME)
-            .select("id")
-            .eq("slate_date", record["slate_date"])
-            .eq("source_file", record["source_file"])
-            .eq("entry_name", record["entry_name"])
-            .eq("contest_type", record["contest_type"])
-            .eq("lineup_id", record["lineup_id"])
-            .limit(1)
-            .execute()
-        )
+        entry_id = record.get("entry_id")
+
+        if entry_id:
+            duplicate_query = (
+                client.table(TABLE_NAME)
+                .select("id")
+                .eq("entry_id", entry_id)
+                .limit(1)
+                .execute()
+            )
+        else:
+            # Legacy fallback for imports that do not contain EntryId.
+            duplicate_query = (
+                client.table(TABLE_NAME)
+                .select("id")
+                .eq("slate_date", record["slate_date"])
+                .eq("source_file", record["source_file"])
+                .eq("entry_name", record["entry_name"])
+                .eq("contest_type", record["contest_type"])
+                .eq("lineup_id", record["lineup_id"])
+                .limit(1)
+                .execute()
+            )
 
         if duplicate_query.data:
-            skipped += 1
+            existing_id = duplicate_query.data[0]["id"]
+
+            client.table(TABLE_NAME).update(
+                record
+            ).eq(
+                "id",
+                existing_id,
+            ).execute()
+
+            updated += 1
             continue
 
-        client.table(TABLE_NAME).insert(record).execute()
+        client.table(TABLE_NAME).insert(
+            record
+        ).execute()
+
         inserted += 1
 
-    return inserted, skipped
+    return inserted, updated
 
 
 def load_contest_history() -> pd.DataFrame:
