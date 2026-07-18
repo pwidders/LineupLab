@@ -39,11 +39,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
 st.image(
-    "assets/lineuplab_baseball_logo.png",
+    "assets/lineuplab_baseball_banner.png",
     width=450,
 )
-
 
 # -------------------------------------------------------------------
 # Lineup Vault
