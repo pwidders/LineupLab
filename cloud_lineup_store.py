@@ -7,6 +7,7 @@ from projection_store import get_supabase_client
 
 
 TABLE_NAME = "saved_lineups"
+WORKING_TABLE_NAME = "working_lineups"
 
 
 def _lineup_to_json(lineup: pd.DataFrame) -> list[dict]:
@@ -158,5 +159,109 @@ def delete_cloud_lineup(
         .eq("slate_date", str(slate_date))
         .eq("slate_name", str(slate_name).strip() or "Main")
         .eq("lineup_slot", int(lineup_slot))
+        .execute()
+    )
+
+def save_cloud_working_lineup(
+    lineup: pd.DataFrame,
+    salary: float,
+    projected_score: float,
+    slate_date: str,
+    slate_name: str,
+    last_action: str = "Working Lineup Update",
+) -> dict:
+    """
+    Create or overwrite the live working lineup for one slate.
+
+    This is separate from the permanent Lineup Vault.
+    """
+
+    slate_name = str(slate_name).strip() or "Main"
+
+    payload = {
+        "slate_date": str(slate_date),
+        "slate_name": slate_name,
+        "lineup_data": _lineup_to_json(lineup),
+        "salary": float(salary),
+        "projected_score": float(projected_score),
+        "last_action": (
+            str(last_action).strip()
+            if str(last_action).strip()
+            else "Working Lineup Update"
+        ),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    supabase = get_supabase_client()
+
+    response = (
+        supabase.table(WORKING_TABLE_NAME)
+        .upsert(
+            payload,
+            on_conflict="slate_date,slate_name",
+        )
+        .execute()
+    )
+
+    if not response.data:
+        raise RuntimeError(
+            "Supabase did not return the saved working lineup."
+        )
+
+    return response.data[0]
+
+
+def load_cloud_working_lineup(
+    slate_date: str,
+    slate_name: str,
+) -> tuple[pd.DataFrame, float, float, dict] | None:
+    """
+    Load the live working lineup for one slate.
+
+    Returns None when no working lineup has been saved.
+    """
+
+    supabase = get_supabase_client()
+
+    response = (
+        supabase.table(WORKING_TABLE_NAME)
+        .select("*")
+        .eq("slate_date", str(slate_date))
+        .eq("slate_name", str(slate_name).strip() or "Main")
+        .limit(1)
+        .execute()
+    )
+
+    if not response.data:
+        return None
+
+    record = response.data[0]
+    lineup = pd.DataFrame(record["lineup_data"])
+
+    return (
+        lineup,
+        float(record.get("salary", 0)),
+        float(record.get("projected_score", 0)),
+        record,
+    )
+
+
+def delete_cloud_working_lineup(
+    slate_date: str,
+    slate_name: str,
+) -> None:
+    """
+    Delete the live working lineup for one slate.
+
+    This does not affect any permanent Lineup Vault entries.
+    """
+
+    supabase = get_supabase_client()
+
+    (
+        supabase.table(WORKING_TABLE_NAME)
+        .delete()
+        .eq("slate_date", str(slate_date))
+        .eq("slate_name", str(slate_name).strip() or "Main")
         .execute()
     )
