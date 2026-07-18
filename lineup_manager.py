@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from cloud_lineup_store import save_cloud_working_lineup
 
 WORKING_LINEUP_KEY = "current_lineup"
 WORKING_SALARY_KEY = "current_salary"
@@ -9,16 +10,39 @@ WORKING_SCORE_KEY = "current_score"
 WORKING_UPDATED_KEY = "current_updated_at"
 
 
-def set_working_lineup(lineup: pd.DataFrame, salary: float, score: float) -> None:
+def set_working_lineup(
+    lineup: pd.DataFrame,
+    salary: float,
+    score: float,
+    slate_date: str | None = None,
+    slate_name: str = "Main",
+    last_action: str = "Working Lineup Update",
+) -> None:
     if lineup is None or lineup.empty:
         raise ValueError("Cannot set an empty working lineup.")
 
     st.session_state[WORKING_LINEUP_KEY] = lineup.copy()
     st.session_state[WORKING_SALARY_KEY] = float(salary)
+    st.session_state[WORKING_SCORE_KEY] = float(score)
+
     st.session_state[WORKING_UPDATED_KEY] = (
         datetime.now(ZoneInfo("America/Los_Angeles"))
         .strftime("%b %d • %I:%M %p")
     )
+
+    if slate_date:
+        try:
+            save_cloud_working_lineup(
+                lineup=lineup,
+                salary=salary,
+                projected_score=score,
+                slate_date=slate_date,
+                slate_name=slate_name,
+                last_action=last_action,
+            )
+        except Exception as exc:
+            # Do not interrupt lineup building if cloud sync fails.
+            print(f"Working lineup cloud sync failed: {exc}")
 
 
 def has_working_lineup() -> bool:
