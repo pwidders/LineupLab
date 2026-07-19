@@ -9,6 +9,8 @@ from cloud_lineup_store import (
     load_cloud_lineup,
     save_cloud_lineup,
     load_cloud_working_lineup,
+    save_cloud_final_lineup,
+    list_cloud_final_lineups,
 )
 from contest_logger import render_contest_logger
 from data_loader import load_excel
@@ -422,6 +424,64 @@ def render_working_lineup_save_controls():
         except Exception as exc:
             st.error(f"Cloud lineup save failed: {exc}")
 
+def render_final_lineup_controls():
+    if not has_working_lineup():
+        return
+
+    st.markdown("### 🏁 Final Lineup")
+
+    lineup_slot = st.selectbox(
+        "Final Lineup Slot",
+        [
+            "Cash",
+            "GPP",
+            "Lineup 1",
+            "Lineup 2",
+            "Lineup 3",
+        ],
+        key="final_lineup_slot",
+    )
+
+    if st.button("🏁 Save Final Lineup"):
+        try:
+            (
+                lineup,
+                salary,
+                score,
+                _,
+            ) = get_working_lineup()
+
+            save_cloud_final_lineup(
+                lineup=lineup,
+                salary=salary,
+                projected_score=score,
+                slate_date=vault_slate_date_str,
+                slate_name=vault_slate_name,
+                lineup_slot=lineup_slot,
+            )
+
+            st.success(
+                f"Saved Final Lineup ({lineup_slot}) ✅"
+            )
+
+        except Exception as exc:
+            st.error(exc)
+
+    saved = list_cloud_final_lineups(
+        vault_slate_date_str,
+        vault_slate_name,
+    )
+
+    if saved:
+        st.markdown("#### Saved Final Lineups")
+
+        for row in saved:
+            st.write(
+                f"**{row['lineup_slot']}**"
+                f" • ${row.get('salary',0):,.0f}"
+                f" • {row.get('projected_score',0):.1f} pts"
+            )
+
 
 # -------------------------------------------------------------------
 # Main tabs
@@ -615,6 +675,8 @@ if uploaded_file:
         )
 
         render_working_lineup_card()
+        
+        render_final_lineup_controls()
 
         if stacks_live.empty:
             st.error(

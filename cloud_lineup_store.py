@@ -8,6 +8,7 @@ from projection_store import get_supabase_client
 
 TABLE_NAME = "saved_lineups"
 WORKING_TABLE_NAME = "working_lineups"
+FINAL_TABLE_NAME = "final_lineups"
 
 
 def _lineup_to_json(lineup: pd.DataFrame) -> list[dict]:
@@ -56,8 +57,8 @@ def save_cloud_lineup(
             if lineup_name and str(lineup_name).strip()
             else f"Lineup #{lineup_slot}"
         ),
-        "salary": float(salary),
-        "projected_score": float(projected_score),
+        "salary": int(salary),
+        "projected_score": round(float(projected_score), 2),
         "lineup_data": _lineup_to_json(lineup),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -263,5 +264,78 @@ def delete_cloud_working_lineup(
         .delete()
         .eq("slate_date", str(slate_date))
         .eq("slate_name", str(slate_name).strip() or "Main")
+        .execute()
+    )
+
+def save_cloud_final_lineup(
+    lineup: pd.DataFrame,
+    salary: float,
+    projected_score: float,
+    slate_date: str,
+    slate_name: str,
+    lineup_slot: str,
+) -> dict:
+    """
+    Create or overwrite the official Final Lineup for one slate/slot.
+    """
+
+    payload = {
+        "slate_date": str(slate_date),
+        "slate_name": str(slate_name).strip() or "Main",
+        "lineup_slot": str(lineup_slot).strip() or "Cash",
+        "lineup_data": _lineup_to_json(lineup),
+        "salary": int(round(float(salary))),
+        "projected_score": round(float(projected_score), 2),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    supabase = get_supabase_client()
+
+    response = (
+        supabase.table(FINAL_TABLE_NAME)
+        .upsert(
+            payload,
+            on_conflict="slate_date,slate_name,lineup_slot",
+        )
+        .execute()
+    )
+
+    if not response.data:
+        raise RuntimeError("Supabase did not return the saved final lineup.")
+
+    return response.data[0]
+
+def list_cloud_final_lineups(
+    slate_date: str,
+    slate_name: str,
+) -> list[dict]:
+
+    supabase = get_supabase_client()
+
+    response = (
+        supabase.table(FINAL_TABLE_NAME)
+        .select("*")
+        .eq("slate_date", str(slate_date))
+        .eq("slate_name", str(slate_name).strip() or "Main")
+        .order("lineup_slot")
+        .execute()
+    )
+
+    return response.data or []
+
+def delete_cloud_final_lineup(
+    slate_date: str,
+    slate_name: str,
+    lineup_slot: str,
+) -> None:
+
+    supabase = get_supabase_client()
+
+    (
+        supabase.table(FINAL_TABLE_NAME)
+        .delete()
+        .eq("slate_date", str(slate_date))
+        .eq("slate_name", str(slate_name).strip() or "Main")
+        .eq("lineup_slot", str(lineup_slot).strip())
         .execute()
     )
