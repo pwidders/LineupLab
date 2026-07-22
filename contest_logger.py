@@ -10,6 +10,8 @@ from contest_history_store import (
     save_contest_history,
     update_contest_history_record,
 )
+from lineup_id import lineup_id_from_text
+from cloud_lineup_store import find_cloud_final_lineup_by_id
 
 
 DEFAULT_ENTRY_NAME = "rentisdue"
@@ -40,21 +42,6 @@ def find_col(df, possible_names):
         if name.lower() in lookup:
             return lookup[name.lower()]
     return None
-
-
-def make_lineup_id(lineup_text):
-    cleaned = "|".join(
-        sorted(
-            p.strip().lower()
-            for p in str(lineup_text).replace(";", ",").split(",")
-            if p.strip()
-        )
-    )
-    if not cleaned:
-        cleaned = str(lineup_text).strip().lower()
-    return hashlib.md5(cleaned.encode("utf-8")).hexdigest()[:10]
-
-
 
 
 def parse_lineup_players(lineup_text):
@@ -145,7 +132,19 @@ def render_single_contest(file, file_index, slate_date):
     points = safe_num(my_row[points_col], 0.0)
     lineup_text = str(my_row[lineup_col])
     rank_pct = rank / field_size if field_size else 0
-    lineup_id = make_lineup_id(lineup_text)
+    lineup_id = lineup_id_from_text(lineup_text)
+
+    try:
+        matched_final_lineup = find_cloud_final_lineup_by_id(
+            lineup_id=lineup_id,
+            slate_date=slate_date.strftime("%Y-%m-%d"),
+        )
+    except Exception as exc:
+        matched_final_lineup = None
+        st.warning(
+            f"Could not check Final Lineup matching: {exc}"
+        )
+
     suggested_type = infer_contest_type(field_size)
 
     contest_type = st.selectbox(
@@ -193,6 +192,24 @@ def render_single_contest(file, file_index, slate_date):
     st.markdown("### Lineup")
     st.write(lineup_text)
     st.caption(f"Lineup ID: {lineup_id}")
+    if matched_final_lineup:
+        matched_slot = matched_final_lineup.get(
+            "lineup_slot",
+            "Unknown",
+        )
+        matched_slate = matched_final_lineup.get(
+            "slate_name",
+            "Main",
+        )
+
+        st.success(
+            f"🏁 Matched Final Lineup: "
+            f"{matched_slot} — {matched_slate}"
+        )
+    else:
+        st.info(
+            "No saved Final Lineup matched this DraftKings entry."
+        )
 
     lineup_players = parse_lineup_players(lineup_text)
     lineup_player_set = {name.strip().lower() for name in lineup_players}

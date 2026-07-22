@@ -1,10 +1,10 @@
-import hashlib
 import json
 from datetime import datetime, timezone
 
 import pandas as pd
 
 from projection_store import get_supabase_client
+from lineup_id import lineup_id_from_dataframe
 
 
 TABLE_NAME = "saved_lineups"
@@ -28,44 +28,6 @@ def _lineup_to_json(lineup: pd.DataFrame) -> list[dict]:
             date_format="iso",
         )
     )
-
-def _make_lineup_id(lineup: pd.DataFrame) -> str:
-    """
-    Create the same lineup fingerprint used by Contest Logger.
-
-    The string is built in DraftKings roster order, such as:
-    P Player P Player C Player 1B Player ...
-    """
-    if lineup is None or lineup.empty:
-        raise ValueError("Cannot create an ID for an empty lineup.")
-
-    required_columns = {"Slot", "Player"}
-
-    if not required_columns.issubset(lineup.columns):
-        raise ValueError(
-            "Final lineup must contain Slot and Player columns."
-        )
-
-    lineup_text = " ".join(
-        f"{str(row['Slot']).strip()} "
-        f"{str(row['Player']).strip()}"
-        for _, row in lineup.iterrows()
-    )
-
-    cleaned = "|".join(
-        sorted(
-            player.strip().lower()
-            for player in lineup_text.replace(";", ",").split(",")
-            if player.strip()
-        )
-    )
-
-    if not cleaned:
-        cleaned = lineup_text.strip().lower()
-
-    return hashlib.md5(
-        cleaned.encode("utf-8")
-    ).hexdigest()[:10]
 
 
 def save_cloud_lineup(
@@ -326,7 +288,7 @@ def save_cloud_final_lineup(
         "salary": int(round(float(salary))),
         "projected_score": round(float(projected_score), 2),
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        "lineup_id": _make_lineup_id(lineup),
+        "lineup_id": lineup_id_from_dataframe(lineup),
     }
 
     supabase = get_supabase_client()
@@ -362,6 +324,48 @@ def list_cloud_final_lineups(
     )
 
     return response.data or []
+
+def find_cloud_final_lineup_by_id(
+    lineup_id: str,
+    slate_date: str | None = None,
+) -> dict | None:
+    """
+    Find a saved Final Lineup using its lineup fingerprint.
+
+    The slate date is optional, but using it prevents an identical lineup
+    from another date from being treated as the current slate's match.
+    """
+
+    lineup_id = str(lineup_id).strip()
+
+    if not lineup_id:
+        return None
+
+    supabase = get_supabase_client()
+
+    query = (
+        supabase.table(FINAL_TABLE_NAME)
+        .select(
+            "id, slate_date, slate_name, lineup_slot, lineup_id, "
+            "salary, projected_score, created_at, updated_at"
+        )
+        .eq("lineup_id", lineup_id)
+    )
+
+    if slate_date:
+        query = query.eq("slate_date", str(slate_date))
+
+    response = (
+        query
+        .order("updated_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not response.data:
+        return None
+
+    return response.data[0]
 
 def delete_cloud_final_lineup(
     slate_date: str,
