@@ -121,6 +121,65 @@ def save_contest_history(
 
     return inserted, updated
 
+def update_contest_history_record(
+    record_id: str,
+    slate_date: str,
+    entry_name: str,
+    contest_type: str,
+    rank: int,
+    field_size: int,
+    points: float,
+    entry_fee: float,
+    winnings: float,
+) -> dict:
+    """
+    Update one previously saved contest-history record.
+    """
+
+    if not record_id:
+        raise ValueError("A contest-history record ID is required.")
+
+    rank = int(rank)
+    field_size = int(field_size)
+    points = float(points)
+    entry_fee = float(entry_fee)
+    winnings = float(winnings)
+
+    profit = winnings - entry_fee
+    rank_percentile = (
+        rank / field_size
+        if field_size > 0
+        else 0
+    )
+
+    payload = {
+        "slate_date": str(slate_date),
+        "entry_name": str(entry_name).strip(),
+        "contest_type": str(contest_type).strip(),
+        "rank": rank,
+        "field_size": field_size,
+        "points": points,
+        "rank_percentile": rank_percentile,
+        "entry_fee": entry_fee,
+        "winnings": winnings,
+        "profit": profit,
+    }
+
+    client = _get_client()
+
+    response = (
+        client.table(TABLE_NAME)
+        .update(payload)
+        .eq("id", str(record_id))
+        .execute()
+    )
+
+    if not response.data:
+        raise RuntimeError(
+            "Supabase did not return the updated contest record."
+        )
+
+    return response.data[0]
 
 def load_contest_history() -> pd.DataFrame:
     client = _get_client()

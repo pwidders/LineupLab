@@ -5,7 +5,11 @@ from datetime import datetime, date
 import pandas as pd
 import streamlit as st
 
-from contest_history_store import save_contest_history
+from contest_history_store import (
+    load_contest_history,
+    save_contest_history,
+    update_contest_history_record,
+)
 
 
 DEFAULT_ENTRY_NAME = "rentisdue"
@@ -284,9 +288,181 @@ def render_single_contest(file, file_index, slate_date):
 
     return summary
 
+def render_saved_contest_editor():
+    st.markdown("### ✏️ Edit Saved Contest Result")
+
+    try:
+        history = load_contest_history()
+    except Exception as exc:
+        st.error(f"Could not load saved contest history: {exc}")
+        return
+
+    if history.empty:
+        st.caption("No saved contest results are available to edit.")
+        return
+
+    history = history.copy()
+
+    history["edit_label"] = history.apply(
+        lambda row: (
+            f"{pd.to_datetime(row.get('slate_date')).strftime('%b %d, %Y')} — "
+            f"{row.get('contest_type', 'Unknown')} — "
+            f"{row.get('entry_name', 'Unknown')} — "
+            f"Rank {int(row.get('rank', 0))}/{int(row.get('field_size', 0))} — "
+            f"{float(row.get('points', 0)):.2f} pts"
+        ),
+        axis=1,
+    )
+
+    selected_label = st.selectbox(
+        "Select a saved contest result",
+        options=history["edit_label"].tolist(),
+        key="saved_contest_edit_selector",
+    )
+
+    selected_row = history[
+        history["edit_label"] == selected_label
+    ].iloc[0]
+
+    selected_id = str(selected_row["id"])
+
+    selected_date = pd.to_datetime(
+        selected_row.get("slate_date"),
+        errors="coerce",
+    )
+
+    if pd.isna(selected_date):
+        selected_date = pd.Timestamp(date.today())
+
+    contest_type_options = [
+        "Double-Up",
+        "Single-Entry GPP",
+        "Other",
+    ]
+
+    current_contest_type = str(
+        selected_row.get("contest_type", "Other")
+    )
+
+    if current_contest_type not in contest_type_options:
+        contest_type_options.append(current_contest_type)
+
+    with st.form("edit_saved_contest_form"):
+        edit_slate_date = st.date_input(
+            "Slate date",
+            value=selected_date.date(),
+        )
+
+        edit_entry_name = st.text_input(
+            "Entry name",
+            value=str(selected_row.get("entry_name", "")),
+        )
+
+        edit_contest_type = st.selectbox(
+            "Contest type",
+            options=contest_type_options,
+            index=contest_type_options.index(
+                current_contest_type
+            ),
+        )
+
+        edit_col1, edit_col2, edit_col3 = st.columns(3)
+
+        with edit_col1:
+            edit_rank = st.number_input(
+                "Rank",
+                min_value=0,
+                value=int(selected_row.get("rank", 0)),
+                step=1,
+            )
+
+        with edit_col2:
+            edit_field_size = st.number_input(
+                "Field size",
+                min_value=0,
+                value=int(selected_row.get("field_size", 0)),
+                step=1,
+            )
+
+        with edit_col3:
+            edit_points = st.number_input(
+                "Points",
+                min_value=0.0,
+                value=float(selected_row.get("points", 0)),
+                step=0.01,
+                format="%.2f",
+            )
+
+        money_col1, money_col2 = st.columns(2)
+
+        with money_col1:
+            edit_entry_fee = st.number_input(
+                "Entry fee",
+                min_value=0.0,
+                value=float(selected_row.get("entry_fee", 0)),
+                step=0.50,
+                format="%.2f",
+            )
+
+        with money_col2:
+            edit_winnings = st.number_input(
+                "Winnings",
+                min_value=0.0,
+                value=float(selected_row.get("winnings", 0)),
+                step=0.50,
+                format="%.2f",
+            )
+
+        preview_profit = (
+            float(edit_winnings) - float(edit_entry_fee)
+        )
+
+        st.metric(
+            "Updated Profit",
+            f"${preview_profit:,.2f}",
+        )
+
+        save_edit = st.form_submit_button(
+            "💾 Save Contest Changes",
+            type="primary",
+        )
+
+    if save_edit:
+        try:
+            update_contest_history_record(
+                record_id=selected_id,
+                slate_date=edit_slate_date.isoformat(),
+                entry_name=edit_entry_name,
+                contest_type=edit_contest_type,
+                rank=int(edit_rank),
+                field_size=int(edit_field_size),
+                points=float(edit_points),
+                entry_fee=float(edit_entry_fee),
+                winnings=float(edit_winnings),
+            )
+
+            st.session_state[
+                "contest_history_edit_notice"
+            ] = "Contest result updated successfully ✅"
+
+            st.rerun()
+
+        except Exception as exc:
+            st.error(f"Could not update contest result: {exc}")
 
 def render_contest_logger():
     st.subheader("Contest Stat Collector")
+
+    edit_notice = st.session_state.pop(
+        "contest_history_edit_notice",
+        None,
+    )
+
+    if edit_notice:
+        st.success(edit_notice)
+
+    with st.expander("✏️ Edit Saved Contest Result"):
+        render_saved_contest_editor()
 
     save_notice = st.session_state.pop(
         "contest_history_save_notice",

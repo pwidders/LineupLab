@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime, timezone
 
@@ -27,6 +28,44 @@ def _lineup_to_json(lineup: pd.DataFrame) -> list[dict]:
             date_format="iso",
         )
     )
+
+def _make_lineup_id(lineup: pd.DataFrame) -> str:
+    """
+    Create the same lineup fingerprint used by Contest Logger.
+
+    The string is built in DraftKings roster order, such as:
+    P Player P Player C Player 1B Player ...
+    """
+    if lineup is None or lineup.empty:
+        raise ValueError("Cannot create an ID for an empty lineup.")
+
+    required_columns = {"Slot", "Player"}
+
+    if not required_columns.issubset(lineup.columns):
+        raise ValueError(
+            "Final lineup must contain Slot and Player columns."
+        )
+
+    lineup_text = " ".join(
+        f"{str(row['Slot']).strip()} "
+        f"{str(row['Player']).strip()}"
+        for _, row in lineup.iterrows()
+    )
+
+    cleaned = "|".join(
+        sorted(
+            player.strip().lower()
+            for player in lineup_text.replace(";", ",").split(",")
+            if player.strip()
+        )
+    )
+
+    if not cleaned:
+        cleaned = lineup_text.strip().lower()
+
+    return hashlib.md5(
+        cleaned.encode("utf-8")
+    ).hexdigest()[:10]
 
 
 def save_cloud_lineup(
@@ -287,6 +326,7 @@ def save_cloud_final_lineup(
         "salary": int(round(float(salary))),
         "projected_score": round(float(projected_score), 2),
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        "lineup_id": _make_lineup_id(lineup),
     }
 
     supabase = get_supabase_client()
