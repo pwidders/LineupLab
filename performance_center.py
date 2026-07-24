@@ -130,6 +130,7 @@ def build_player_history(history: pd.DataFrame) -> pd.DataFrame:
                     "fpts": player.get("fpts", 0),
                     "slate_date": contest.get("slate_date"),
                     "contest_type": contest.get("contest_type"),
+                    "entry_name": contest.get("entry_name", ""),
                     "entry_fee": contest.get("entry_fee", 0),
                     "winnings": contest.get("winnings", 0),
                     "profit": contest.get("profit", 0),
@@ -163,6 +164,7 @@ def build_player_history(history: pd.DataFrame) -> pd.DataFrame:
         subset=[
             "slate_date",
             "contest_type",
+            "entry_name",
             "lineup_id",
             "player_key",
         ],
@@ -406,113 +408,144 @@ def render_performance_center():
 
     st.divider()
 
-    st.subheader("Player Analytics")
+    st.subheader("👤 Player Performance")
 
     players = build_player_history(history)
 
     if players.empty:
         st.info(
-            "Player analytics will appear after contests "
+            "Player performance will appear after contests "
             "with player-results data are saved."
         )
         return
 
+    players = players.copy()
+
+    players["entry_fee"] = pd.to_numeric(
+        players["entry_fee"],
+        errors="coerce",
+    ).fillna(0)
+
+    players["winnings"] = pd.to_numeric(
+        players["winnings"],
+        errors="coerce",
+    ).fillna(0)
+
+    players["profit"] = (
+        players["winnings"] - players["entry_fee"]
+    )
+
+    players["cashed"] = players["winnings"] > 0
+
+    players["lineup_key"] = (
+        players["slate_date"].astype(str)
+        + "|"
+        + players["lineup_id"].fillna("").astype(str)
+    )
+
+    missing_lineup_id = (
+        players["lineup_id"].isna()
+        | (
+            players["lineup_id"]
+            .astype(str)
+            .str.strip()
+            == ""
+        )
+    )
+
+    players.loc[missing_lineup_id, "lineup_key"] = (
+        players.loc[missing_lineup_id, "slate_date"].astype(str)
+        + "|"
+        + players.loc[missing_lineup_id, "entry_name"].astype(str)
+    )
+
     player_summary = (
         players.groupby("player", as_index=False)
         .agg(
-            times_used=("player", "size"),
+            uses=("lineup_key", "nunique"),
+            entries=("player", "size"),
             average_fpts=("fpts", "mean"),
             average_ownership=("ownership", "mean"),
+            total_fees=("entry_fee", "sum"),
+            profit=("profit", "sum"),
+            cash_rate=("cashed", "mean"),
         )
     )
 
     player_summary = player_summary[
         player_summary["player"].astype(str).str.strip() != ""
-    ]
+    ].copy()
 
-    col1, col2, col3 = st.columns(3)
+    player_summary["roi"] = player_summary.apply(
+        lambda row: (
+            row["profit"] / row["total_fees"]
+            if row["total_fees"] > 0
+            else 0.0
+        ),
+        axis=1,
+    )
 
-    with col1:
-        st.markdown("#### Most Used Players")
+    player_summary = player_summary.sort_values(
+        ["uses", "average_fpts"],
+        ascending=[False, False],
+    )
 
-        most_used = (
-            player_summary.sort_values(
-                ["times_used", "average_fpts"],
-                ascending=[False, False],
-            )
-            .head(10)
-            .rename(
-                columns={
-                    "player": "Player",
-                    "times_used": "Uses",
-                }
-            )
+    player_display = player_summary[
+        [
+            "player",
+            "uses",
+            "entries",
+            "average_fpts",
+            "average_ownership",
+            "profit",
+            "roi",
+            "cash_rate",
+        ]
+    ].copy()
+
+    player_display["average_fpts"] = (
+        player_display["average_fpts"].round(2)
+    )
+
+    player_display["average_ownership"] = (
+        player_display["average_ownership"].map(
+            lambda value: f"{value:.1f}%"
         )
+    )
 
-        st.dataframe(
-            most_used[["Player", "Uses"]],
-            use_container_width=True,
-            hide_index=True,
-        )
+    player_display["profit"] = player_display["profit"].map(
+        format_profit
+    )
 
-    with col2:
-        st.markdown("#### Highest Average DK Points")
+    player_display["roi"] = player_display["roi"].map(
+        lambda value: f"{value:.1%}"
+    )
 
-        best_fpts = (
-            player_summary.sort_values(
-                "average_fpts",
-                ascending=False,
-            )
-            .head(10)
-            .copy()
-        )
+    player_display["cash_rate"] = player_display["cash_rate"].map(
+        lambda value: f"{value:.1%}"
+    )
 
-        best_fpts["average_fpts"] = (
-            best_fpts["average_fpts"].round(2)
-        )
+    player_display = player_display.rename(
+        columns={
+            "player": "Player",
+            "uses": "Uses",
+            "entries": "Entries",
+            "average_fpts": "Avg DK Points",
+            "average_ownership": "Avg Ownership",
+            "profit": "Profit",
+            "roi": "ROI",
+            "cash_rate": "Cash Rate",
+        }
+    )
 
-        best_fpts = best_fpts.rename(
-            columns={
-                "player": "Player",
-                "average_fpts": "Avg DK Points",
-            }
-        )
+    st.caption(
+        "Uses counts unique lineups. Entries counts every contest "
+        "entry containing that player."
+    )
 
-        st.dataframe(
-            best_fpts[["Player", "Avg DK Points"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    with col3:
-        st.markdown("#### Highest Average Ownership")
-
-        highest_owned = (
-            player_summary.sort_values(
-                "average_ownership",
-                ascending=False,
-            )
-            .head(10)
-            .copy()
-        )
-
-        highest_owned["average_ownership"] = (
-            highest_owned["average_ownership"].map(
-                lambda value: f"{value:.1f}%"
-            )
-        )
-
-        highest_owned = highest_owned.rename(
-            columns={
-                "player": "Player",
-                "average_ownership": "Avg Ownership",
-            }
-        )
-
-        st.dataframe(
-            highest_owned[
-                ["Player", "Avg Ownership"]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
+    st.dataframe(
+        player_display,
+        use_container_width=True,
+        hide_index=True,
+        height=420,
+    )
