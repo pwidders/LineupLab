@@ -1,3 +1,4 @@
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -183,7 +184,7 @@ def format_profit(value: float) -> str:
 
 
 def render_performance_center():
-    st.header("📊 Performance Center")
+    st.header("📊 Performance Dashboard")
 
     try:
         history = load_contest_history()
@@ -204,170 +205,196 @@ def render_performance_center():
 
     metrics = calculate_overall_metrics(history)
 
-    st.subheader("Overall Performance")
+    st.subheader("At a Glance")
 
-    row1 = st.columns(4)
+    cards = st.columns(5)
 
-    row1[0].metric(
-        "Total Entry Fees",
-        f"${metrics['total_fees']:,.2f}",
-    )
-
-    row1[1].metric(
-        "Total Winnings",
-        f"${metrics['total_winnings']:,.2f}",
-    )
-
-    row1[2].metric(
-        "Net Profit",
+    cards[0].metric(
+        "Lifetime Profit",
         format_profit(metrics["net_profit"]),
     )
 
-    row1[3].metric(
+    cards[1].metric(
         "ROI",
         f"{metrics['roi']:.1%}",
     )
 
-    row2 = st.columns(4)
-
-    row2[0].metric(
+    cards[2].metric(
         "Cash Rate",
         f"{metrics['cash_rate']:.1%}",
     )
 
-    row2[1].metric(
-        "Total Contests",
+    cards[3].metric(
+        "Entries",
         f"{metrics['total_contests']:,}",
     )
 
-    row2[2].metric(
+    cards[4].metric(
         "Average DK Points",
         f"{metrics['average_points']:.2f}",
     )
 
-    row2[3].metric(
-        "Average Finish Percentile",
-        f"{metrics['average_finish_percentile']:.1%}",
-    )
-
     st.divider()
 
-    st.subheader("Slate History")
+    st.subheader("📈 Bankroll Curve")
 
     slates = build_slate_history(history)
 
     if slates.empty:
-
         st.info("No slates found.")
-
     else:
-
-        display = slates.copy()
-
-        display["total_fees"] = display["total_fees"].map(
-            lambda x: f"${x:.2f}"
+        profit_curve = (
+            slates[
+                ["slate_date", "profit"]
+            ]
+            .copy()
+            .sort_values("slate_date")
         )
 
-        display["total_winnings"] = display["total_winnings"].map(
-            lambda x: f"${x:.2f}"
+        profit_curve["slate_date"] = pd.to_datetime(
+            profit_curve["slate_date"],
+            errors="coerce",
         )
 
-        display["profit"] = display["profit"].map(
-            format_profit
+        profit_curve = profit_curve.dropna(
+            subset=["slate_date"]
         )
 
-        display["roi"] = display["roi"].map(
-            lambda x: f"{x:.1%}"
+        profit_curve["cumulative_profit"] = (
+            profit_curve["profit"].cumsum()
         )
 
-        display["average_points"] = display["average_points"].round(2)
-
-        display["slate_date"] = pd.to_datetime(
-            display["slate_date"]
-        ).dt.strftime("%Y-%m-%d")
-
-        display = display.rename(
-            columns={
-                "slate_date": "Slate Date",
-                "contests": "Contests",
-                "total_fees": "Total Fees",
-                "total_winnings": "Total Winnings",
-                "average_points": "Average Points",
-                "profit": "Profit",
-                "roi": "ROI",
-            }
+        bankroll_chart = (
+            alt.Chart(profit_curve)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X(
+                    "slate_date:T",
+                    title="Slate Date",
+                    axis=alt.Axis(
+                        format="%b %d",
+                        labelAngle=0,
+                    ),
+                ),
+                y=alt.Y(
+                    "cumulative_profit:Q",
+                    title="Profit ($)",
+                ),
+                tooltip=[
+                    alt.Tooltip(
+                        "slate_date:T",
+                        title="Slate",
+                        format="%b %d, %Y",
+                    ),
+                    alt.Tooltip(
+                        "profit:Q",
+                        title="Slate Profit",
+                        format="$.2f",
+                    ),
+                    alt.Tooltip(
+                        "cumulative_profit:Q",
+                        title="Running Profit",
+                        format="$.2f",
+                    ),
+                ],
+            )
+            .properties(height=280)
         )
 
-    st.dataframe(
-        display,
-        use_container_width=True,
-        hide_index=True,
+        st.altair_chart(
+            bankroll_chart,
+            use_container_width=True,
+        )
+
+        st.caption(
+            "Each point reflects your running lifetime profit "
+            "after all contests from that slate are included."
+        )
+
+    st.markdown("### 🏟 Contest Performance")
+
+    contest_performance = history.copy()
+
+    contest_performance["roi"] = contest_performance.apply(
+        lambda row: (
+            row["profit"] / row["entry_fee"]
+            if row["entry_fee"] > 0
+            else 0.0
+        ),
+        axis=1,
     )
 
-    st.markdown("### Slate Details")
-
-    slate_options = (
-        slates["slate_date"]
-        .dropna()
-        .sort_values(ascending=False)
-        .dt.strftime("%Y-%m-%d")
-        .tolist()
+    contest_performance["finish"] = (
+        contest_performance["rank"].astype(int).astype(str)
+        + " / "
+        + contest_performance["field_size"].astype(int).astype(str)
     )
 
-    selected_slate = st.selectbox(
-        "Select a slate",
-        options=slate_options,
-        key="performance_selected_slate",
+    contest_performance["cash_result"] = (
+        contest_performance["winnings"] > 0
+    ).map(
+        {
+            True: "✅",
+            False: "❌",
+        }
     )
 
-    selected_date = pd.to_datetime(selected_slate).date()
+    contest_performance = contest_performance.sort_values(
+        ["slate_date", "contest_type"],
+        ascending=[False, True],
+    )
 
-    slate_contests = history[
-        history["slate_date"].dt.date == selected_date
+    contest_display = contest_performance[
+        [
+            "slate_date",
+            "contest_type",
+            "entry_name",
+            "entry_fee",
+            "winnings",
+            "profit",
+            "roi",
+            "points",
+            "finish",
+            "cash_result",
+        ]
     ].copy()
 
-    contest_display = slate_contests.copy()
-
-    contest_display["Finish"] = (
-        contest_display["rank"].astype(int).astype(str)
-        + " / "
-        + contest_display["field_size"].astype(int).astype(str)
-    )
+    contest_display["slate_date"] = pd.to_datetime(
+        contest_display["slate_date"]
+    ).dt.strftime("%Y-%m-%d")
 
     contest_display["entry_fee"] = contest_display["entry_fee"].map(
-        lambda x: f"${x:.2f}"
+        lambda value: f"${value:.2f}"
     )
 
     contest_display["winnings"] = contest_display["winnings"].map(
-        lambda x: f"${x:.2f}"
+        lambda value: f"${value:.2f}"
     )
 
     contest_display["profit"] = contest_display["profit"].map(
         format_profit
     )
 
-    contest_display["points"] = contest_display["points"].map(
-        lambda x: f"{x:.2f}"
+    contest_display["roi"] = contest_display["roi"].map(
+        lambda value: f"{value:.1%}"
     )
 
-    contest_display = contest_display[
-        [
-            "contest_type",
-            "entry_name",
-            "Finish",
-            "points",
-            "entry_fee",
-            "winnings",
-            "profit",
-        ]
-    ].rename(
+    contest_display["points"] = contest_display["points"].map(
+        lambda value: f"{value:.2f}"
+    )
+
+    contest_display = contest_display.rename(
         columns={
+            "slate_date": "Slate",
             "contest_type": "Contest",
             "entry_name": "Entry",
-            "points": "DK Points",
             "entry_fee": "Fee",
-            "winnings": "Winnings",
+            "winnings": "Won",
             "profit": "Profit",
+            "roi": "ROI",
+            "points": "DK Points",
+            "finish": "Finish",
+            "cash_result": "Cash",
         }
     )
 
