@@ -347,7 +347,7 @@ def find_cloud_final_lineup_by_id(
         supabase.table(FINAL_TABLE_NAME)
         .select(
             "id, slate_date, slate_name, lineup_slot, lineup_id, "
-            "salary, projected_score, created_at, updated_at"
+            "salary, projected_score, saved_at, updated_at"
         )
         .eq("lineup_id", lineup_id)
     )
