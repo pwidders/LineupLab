@@ -235,18 +235,135 @@ def render_single_contest(file, file_index, slate_date):
         )
 
     player_rows["Ownership %"] = player_rows[drafted_col].apply(parse_percent)
-    player_rows["FPTS"] = pd.to_numeric(player_rows[fpts_col], errors="coerce").fillna(0)
+    player_rows["FPTS"] = pd.to_numeric(
+        player_rows[fpts_col],
+        errors="coerce",
+    ).fillna(0)
+
+    # Enrich DraftKings results with metadata preserved in the
+    # matched Final Lineup. DraftKings contest exports provide
+    # ownership and actual points, but not the optimizer's team,
+    # salary, or projection fields.
+    final_lineup_lookup = {}
+
+    if matched_final_lineup:
+        final_lineup_data = matched_final_lineup.get(
+            "lineup_data",
+            [],
+        )
+
+        if isinstance(final_lineup_data, list):
+            for saved_player in final_lineup_data:
+                if not isinstance(saved_player, dict):
+                    continue
+
+                saved_name = (
+                    saved_player.get("Player")
+                    or saved_player.get("player")
+                    or saved_player.get("Players")
+                    or ""
+                )
+
+                saved_key = str(saved_name).strip().lower()
+
+                if saved_key:
+                    final_lineup_lookup[saved_key] = saved_player
+
+    def get_saved_metadata(player_name, possible_fields, default=""):
+        saved_player = final_lineup_lookup.get(
+            str(player_name).strip().lower(),
+            {},
+        )
+
+        for field in possible_fields:
+            value = saved_player.get(field)
+
+            if value is not None and str(value).strip() != "":
+                return value
+
+        return default
+
+    player_rows["Team"] = player_rows[player_col].apply(
+        lambda player_name: get_saved_metadata(
+            player_name,
+            [
+                "Team",
+                "team",
+                "TeamAbbrev",
+                "team_abbrev",
+                "Team Abbreviation",
+            ],
+        )
+    )
+
+    player_rows["Salary"] = pd.to_numeric(
+        player_rows[player_col].apply(
+            lambda player_name: get_saved_metadata(
+                player_name,
+                ["Salary", "salary"],
+                0,
+            )
+        ),
+        errors="coerce",
+    ).fillna(0)
+
+    player_rows["Projection"] = pd.to_numeric(
+        player_rows[player_col].apply(
+            lambda player_name: get_saved_metadata(
+                player_name,
+                [
+                    "DK Projection",
+                    "Projection",
+                    "Projected Points",
+                    "projection",
+                    "projected_points",
+                ],
+                0,
+            )
+        ),
+        errors="coerce",
+    ).fillna(0)
 
     st.markdown("### Your Lineup — Ownership / Results")
-    visible = player_rows[[player_col, roster_col, "Ownership %", "FPTS"]].copy()
-    visible.columns = ["Player", "Roster Position", "Ownership %", "FPTS"]
-    st.dataframe(visible.sort_values("Ownership %", ascending=False), use_container_width=True)
+
+    visible = player_rows[
+        [
+            player_col,
+            roster_col,
+            "Team",
+            "Salary",
+            "Projection",
+            "Ownership %",
+            "FPTS",
+        ]
+    ].copy()
+
+    visible.columns = [
+        "Player",
+        "Roster Position",
+        "Team",
+        "Salary",
+        "Projection",
+        "Ownership %",
+        "FPTS",
+    ]
+
+    st.dataframe(
+        visible.sort_values(
+            "Ownership %",
+            ascending=False,
+        ),
+        use_container_width=True,
+    )
 
     player_results = (
         visible.rename(
             columns={
                 "Player": "player",
                 "Roster Position": "roster_position",
+                "Team": "team",
+                "Salary": "salary",
+                "Projection": "projection",
                 "Ownership %": "ownership",
                 "FPTS": "fpts",
             }
