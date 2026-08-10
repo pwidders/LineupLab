@@ -222,6 +222,23 @@ def render_single_contest(file, file_index, slate_date):
         .isin(lineup_player_set)
     ].copy()
 
+    # DraftKings can include the same player more than once in the
+    # player-results section because of multi-position eligibility.
+    # A DFS lineup can only contain the player once, so keep one row
+    # per player before calculating ownership/results.
+    player_rows["_player_key"] = (
+        player_rows[player_col]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+    )
+
+    player_rows = (
+        player_rows
+        .drop_duplicates(subset=["_player_key"], keep="first")
+        .drop(columns=["_player_key"])
+    )
+
     if player_rows.empty:
         st.warning(
             "Could not match the lineup players to the player-results rows. "
@@ -317,6 +334,9 @@ def render_single_contest(file, file_index, slate_date):
                     "Projected Points",
                     "projection",
                     "projected_points",
+                    "Score",
+                    "score",
+                    "_score",
                 ],
                 0,
             )

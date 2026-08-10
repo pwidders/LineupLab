@@ -236,6 +236,7 @@ def build_stack_lineup(hitters, pitchers, stacks_df):
                                         "Player": row[p_player],
                                         "Team": row.get("Team", ""),
                                         "Salary": row["_salary"],
+                                        "Projection": row["_score"],
                                         "Score": row["_score"]
                                     })
 
@@ -246,6 +247,7 @@ def build_stack_lineup(hitters, pitchers, stacks_df):
                                         "Player": row[player_col],
                                         "Team": row[team_col],
                                         "Salary": row["_salary"],
+                                        "Projection": row["_score"],
                                         "Score": row["_score"]
                                     })
 
@@ -427,6 +429,7 @@ def build_real_optimizer_lineup(
             "Player": pitchers.loc[i, p_player_col],
             "Team": pitchers.loc[i, p_team_col],
             "Salary": pitchers.loc[i, "_salary"],
+            "Projection": pitchers.loc[i, "_score"],
             "Score": pitchers.loc[i, "_score"]
         })
 
@@ -439,6 +442,7 @@ def build_real_optimizer_lineup(
                     "Player": hitters.loc[i, player_col],
                     "Team": hitters.loc[i, team_col],
                     "Salary": hitters.loc[i, "_salary"],
+                    "Projection": hitters.loc[i, "_score"],
                     "Score": hitters.loc[i, "_score"]
                 })
 
