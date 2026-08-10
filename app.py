@@ -27,6 +27,7 @@ from model import (
     build_stacks,
     compute_hitter_ratings,
     compute_pitcher_ratings,
+    get_cash_v2_diagnostics,
 )
 from projection_store import load_projection_file, save_projection_file
 from render import render_lineup
@@ -720,6 +721,112 @@ if uploaded_file:
                     step=100,
                 )
 
+            strategy_mode = st.selectbox(
+                "Optimizer Strategy",
+                options=["Baseline", "Cash v2"],
+                index=(
+                    1
+                    if vault_slate_date_str >= "2026-08-10"
+                    else 0
+                ),
+                help=(
+                    "Cash v2 is the controlled cash-game experiment "
+                    "starting Aug 10, 2026. Raw DK Projection remains "
+                    "the dominant signal, with modest pre-lock boosts "
+                    "from Cash Rating and Projected Value plus a "
+                    "top-quartile pitcher requirement. Baseline preserves "
+                    "the original optimizer behavior."
+                ),
+                key="optimizer_strategy_mode",
+            )
+
+            if strategy_mode == "Cash v2":
+                st.info(
+                    "🧪 Cash Strategy v2 active — experiment start: "
+                    "2026-08-10. Raw player projections are preserved "
+                    "unchanged for performance analysis."
+                )
+
+                cash_v2_diag = get_cash_v2_diagnostics(
+                    hitters_live,
+                    pitchers_live,
+                    primary_stack=primary_stack,
+                    secondary_stack=secondary_stack,
+                )
+
+                with st.expander(
+                    "🧪 Cash v2 Diagnostics",
+                    expanded=True,
+                ):
+                    st.caption(
+                        "Cash v2 objective = raw DK Projection + modest "
+                        "Cash Rating / Projected Value adjustments. "
+                        "Saved projections remain the raw DK Projection."
+                    )
+
+                    source_cols = st.columns(2)
+
+                    hitter_ready = (
+                        cash_v2_diag.get("hitter_cash_column")
+                        and cash_v2_diag.get("hitter_value_column")
+                    )
+                    pitcher_ready = (
+                        cash_v2_diag.get("pitcher_cash_column")
+                        and cash_v2_diag.get("pitcher_value_column")
+                    )
+
+                    source_cols[0].metric(
+                        "Hitter cash inputs",
+                        "Ready" if hitter_ready else "Missing",
+                    )
+                    source_cols[1].metric(
+                        "Pitcher cash inputs",
+                        "Ready" if pitcher_ready else "Missing",
+                    )
+
+                    if hitter_ready:
+                        st.write(
+                            "Hitter inputs: "
+                            f"**{cash_v2_diag['hitter_cash_column']}** + "
+                            f"**{cash_v2_diag['hitter_value_column']}**"
+                        )
+                    else:
+                        st.warning(
+                            "Cash Rating and/or Projected Value could not "
+                            "be detected for hitters."
+                        )
+
+                    if pitcher_ready:
+                        st.write(
+                            "Pitcher inputs: "
+                            f"**{cash_v2_diag['pitcher_cash_column']}** + "
+                            f"**{cash_v2_diag['pitcher_value_column']}**"
+                        )
+                    else:
+                        st.warning(
+                            "Cash Rating and/or Projected Value could not "
+                            "be detected for pitchers."
+                        )
+
+                    premium_cutoff = cash_v2_diag.get(
+                        "premium_pitcher_cutoff"
+                    )
+
+                    if premium_cutoff is not None:
+                        st.write(
+                            "Premium pitcher cutoff "
+                            "(top quartile by raw projection): "
+                            f"**{premium_cutoff:.2f} DK pts**"
+                        )
+                        st.write(
+                            "Pitchers meeting premium cutoff: "
+                            f"**{cash_v2_diag['premium_pitcher_count']}**"
+                        )
+                    else:
+                        st.warning(
+                            "Could not determine the premium-pitcher cutoff."
+                        )
+
             num_lineups = st.number_input(
                 "Number of lineups",
                 min_value=1,
@@ -753,6 +860,7 @@ if uploaded_file:
                         primary_stack=primary_stack,
                         secondary_stack=secondary_stack,
                         min_salary=min_salary,
+                        strategy_mode=strategy_mode,
                     )
                 )
 
@@ -815,6 +923,7 @@ if uploaded_file:
                 secondary_stack=secondary_stack,
                 min_salary=min_salary,
                 max_player_exposure=max_player_exposure,
+                strategy_mode=strategy_mode,
             )
 
             if multi.empty:

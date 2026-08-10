@@ -236,7 +236,6 @@ def build_stack_lineup(hitters, pitchers, stacks_df):
                                         "Player": row[p_player],
                                         "Team": row.get("Team", ""),
                                         "Salary": row["_salary"],
-                                        "Projection": row["_score"],
                                         "Score": row["_score"]
                                     })
 
@@ -247,7 +246,6 @@ def build_stack_lineup(hitters, pitchers, stacks_df):
                                         "Player": row[player_col],
                                         "Team": row[team_col],
                                         "Salary": row["_salary"],
-                                        "Projection": row["_score"],
                                         "Score": row["_score"]
                                     })
 
@@ -259,6 +257,63 @@ def build_stack_lineup(hitters, pitchers, stacks_df):
 
     return best_lineup, best_lineup["Salary"].sum(), best_lineup["Score"].sum()
 
+def get_cash_v2_diagnostics(
+    hitters,
+    pitchers,
+    primary_stack=None,
+    secondary_stack=None,
+):
+    """
+    Return read-only diagnostics for the Cash v2 floor experiment.
+    """
+    hitters = hitters.copy()
+    pitchers = pitchers.copy()
+
+    hitter_cash_col = find_optional_col(
+        hitters,
+        ["Cash rating", "Cash Rating"],
+    )
+    hitter_value_col = find_optional_col(
+        hitters,
+        ["Projected value", "Projected Value"],
+    )
+    pitcher_cash_col = find_optional_col(
+        pitchers,
+        ["Cash rating", "Cash Rating"],
+    )
+    pitcher_value_col = find_optional_col(
+        pitchers,
+        ["Projected value", "Projected Value"],
+    )
+    pitcher_projection_col = find_optional_col(
+        pitchers,
+        ["DK Projection", "Projection"],
+    )
+
+    result = {
+        "hitter_cash_column": hitter_cash_col,
+        "hitter_value_column": hitter_value_col,
+        "pitcher_cash_column": pitcher_cash_col,
+        "pitcher_value_column": pitcher_value_col,
+        "premium_pitcher_cutoff": None,
+        "premium_pitcher_count": 0,
+    }
+
+    if pitcher_projection_col is not None and not pitchers.empty:
+        pitcher_projection = pd.to_numeric(
+            pitchers[pitcher_projection_col],
+            errors="coerce",
+        ).fillna(0)
+
+        cutoff = float(pitcher_projection.quantile(0.75))
+        result["premium_pitcher_cutoff"] = cutoff
+        result["premium_pitcher_count"] = int(
+            (pitcher_projection >= cutoff).sum()
+        )
+
+    return result
+
+
 def build_real_optimizer_lineup(
     hitters,
     pitchers,
@@ -267,7 +322,8 @@ def build_real_optimizer_lineup(
     excluded_players=None,
     primary_stack=None,
     secondary_stack=None,
-    min_salary=0
+    min_salary=0,
+    strategy_mode="Baseline",
 ):
     locked_players = set([str(p) for p in locked_players]) if locked_players else set()
     excluded_players = set([str(p) for p in excluded_players]) if excluded_players else set()
@@ -295,9 +351,21 @@ def build_real_optimizer_lineup(
         ).fillna(0)
 
     hitters["_salary"] = clean_money(hitters[salary_col])
-    hitters["_score"] = pd.to_numeric(hitters[score_col], errors="coerce").fillna(0)
+    hitters["_projection"] = pd.to_numeric(
+        hitters[score_col],
+        errors="coerce",
+    ).fillna(0)
     pitchers["_salary"] = clean_money(pitchers[p_salary_col])
-    pitchers["_score"] = pd.to_numeric(pitchers[p_score_col], errors="coerce").fillna(0)
+    pitchers["_projection"] = pd.to_numeric(
+        pitchers[p_score_col],
+        errors="coerce",
+    ).fillna(0)
+
+    # Keep optimizer strategy adjustments separate from the raw
+    # projection. Projection is what gets stored for later accuracy
+    # analysis; objective_score is used only to choose the lineup.
+    hitters["_objective_score"] = hitters["_projection"].copy()
+    pitchers["_objective_score"] = pitchers["_projection"].copy()
 
     hitters = hitters[hitters["_salary"] > 0].reset_index(drop=True)
     pitchers = pitchers[pitchers["_salary"] > 0].reset_index(drop=True)
@@ -313,6 +381,74 @@ def build_real_optimizer_lineup(
 
     if primary_stack == secondary_stack:
         return pd.DataFrame(), 0, 0
+
+    # --------------------------------------------------------------
+    # Cash Strategy v2 (experiment starts 2026-08-10)
+    # --------------------------------------------------------------
+    # Cash v2 uses ONLY information available before lock.
+    #
+    # Raw DK Projection remains the dominant signal and is preserved
+    # unchanged for later projection-accuracy analysis. Cash Rating and
+    # Projected Value are used only as modest optimizer tie-breakers /
+    # floor adjustments.
+    if str(strategy_mode).strip().lower() == "cash v2":
+        hitter_cash_col = find_optional_col(
+            hitters,
+            ["Cash rating", "Cash Rating"],
+        )
+        hitter_value_col = find_optional_col(
+            hitters,
+            ["Projected value", "Projected Value"],
+        )
+        pitcher_cash_col = find_optional_col(
+            pitchers,
+            ["Cash rating", "Cash Rating"],
+        )
+        pitcher_value_col = find_optional_col(
+            pitchers,
+            ["Projected value", "Projected Value"],
+        )
+
+        if hitter_cash_col is not None:
+            hitter_cash = pd.to_numeric(
+                hitters[hitter_cash_col],
+                errors="coerce",
+            ).fillna(0)
+            hitters["_objective_score"] += 0.025 * hitter_cash
+
+        if hitter_value_col is not None:
+            hitter_value = pd.to_numeric(
+                hitters[hitter_value_col],
+                errors="coerce",
+            ).fillna(0)
+            hitters["_objective_score"] += 0.35 * hitter_value
+
+        # Pitching receives a slightly stronger cash-floor adjustment
+        # because pitcher scoring is a major source of MLB cash-game
+        # lineup variance.
+        if pitcher_cash_col is not None:
+            pitcher_cash = pd.to_numeric(
+                pitchers[pitcher_cash_col],
+                errors="coerce",
+            ).fillna(0)
+            pitchers["_objective_score"] += 0.040 * pitcher_cash
+
+        if pitcher_value_col is not None:
+            pitcher_value = pd.to_numeric(
+                pitchers[pitcher_value_col],
+                errors="coerce",
+            ).fillna(0)
+            pitchers["_objective_score"] += 0.40 * pitcher_value
+
+        # Require at least one pitcher from the top quartile of raw
+        # pitcher DK projections. The raw projection—not the adjusted
+        # Cash v2 objective—is used to define the premium tier.
+        premium_pitcher_cutoff = pitchers["_projection"].quantile(0.75)
+        pitchers["_cash_v2_premium"] = (
+            pitchers["_projection"] >= premium_pitcher_cutoff
+        )
+    else:
+        pitchers["_cash_v2_premium"] = False
 
     hitter_slots = ["C", "1B", "2B", "3B", "SS", "OF1", "OF2", "OF3"]
 
@@ -334,8 +470,15 @@ def build_real_optimizer_lineup(
 
     # Objective
     prob += (
-        pulp.lpSum(p_vars[i] * pitchers.loc[i, "_score"] for i in pitchers.index) +
-        pulp.lpSum(h_vars[(i, slot)] * hitters.loc[i, "_score"] for (i, slot) in h_vars)
+        pulp.lpSum(
+            p_vars[i] * pitchers.loc[i, "_objective_score"]
+            for i in pitchers.index
+        )
+        +
+        pulp.lpSum(
+            h_vars[(i, slot)] * hitters.loc[i, "_objective_score"]
+            for (i, slot) in h_vars
+        )
     )
 
     total_salary = (
@@ -349,6 +492,18 @@ def build_real_optimizer_lineup(
 
     # Pitchers
     prob += pulp.lpSum(p_vars[i] for i in pitchers.index) == 2
+
+    if str(strategy_mode).strip().lower() == "cash v2":
+        premium_indexes = [
+            i
+            for i in pitchers.index
+            if bool(pitchers.loc[i, "_cash_v2_premium"])
+        ]
+        if premium_indexes:
+            prob += pulp.lpSum(
+                p_vars[i] for i in premium_indexes
+            ) >= 1
+
     # Do not allow two pitchers facing each other
     for i in pitchers.index:
         for j in pitchers.index:
@@ -429,8 +584,8 @@ def build_real_optimizer_lineup(
             "Player": pitchers.loc[i, p_player_col],
             "Team": pitchers.loc[i, p_team_col],
             "Salary": pitchers.loc[i, "_salary"],
-            "Projection": pitchers.loc[i, "_score"],
-            "Score": pitchers.loc[i, "_score"]
+            "Projection": pitchers.loc[i, "_projection"],
+            "Score": pitchers.loc[i, "_projection"]
         })
 
     for slot in hitter_slots:
@@ -442,8 +597,8 @@ def build_real_optimizer_lineup(
                     "Player": hitters.loc[i, player_col],
                     "Team": hitters.loc[i, team_col],
                     "Salary": hitters.loc[i, "_salary"],
-                    "Projection": hitters.loc[i, "_score"],
-                    "Score": hitters.loc[i, "_score"]
+                    "Projection": hitters.loc[i, "_projection"],
+                    "Score": hitters.loc[i, "_projection"]
                 })
 
     lineup = pd.DataFrame(rows)
@@ -461,6 +616,7 @@ def build_multiple_lineups(
     secondary_stack=None,
     min_salary=0,
     max_player_exposure=66,
+    strategy_mode="Baseline",
 ):
     """
     Build multiple lineups with both:
@@ -523,6 +679,7 @@ def build_multiple_lineups(
             primary_stack=primary_stack,
             secondary_stack=secondary_stack,
             min_salary=min_salary,
+            strategy_mode=strategy_mode,
         )
 
         if lineup.empty:
