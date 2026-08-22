@@ -1,6 +1,19 @@
+# Streamlit secrets
 .streamlit/secrets.toml
+
+# Python
 __pycache__/
 *.pyc
-__pycache__/model.cpython-314.pyc
-*.pyc
-__pycache__/model.cpython-314.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment/secrets
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
