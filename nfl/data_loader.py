@@ -102,3 +102,29 @@ def load_dk_salaries(uploaded_file):
     ]
 
     return df[columns].reset_index(drop=True)
+
+def merge_with_dst_baselines(players, dst_baselines):
+    """
+    Merge team-defense baselines onto current DK DST rows.
+    """
+
+    merged = players.merge(
+        dst_baselines,
+        on="team",
+        how="left",
+    )
+
+    return merged
+
+def merge_with_baselines(dk_players, baselines):
+    """
+    Merge current DraftKings slate players with historical/recent NFL baselines.
+    """
+
+    merged = dk_players.merge(
+        baselines,
+        on=["player", "position"],
+        how="left",
+    )
+
+    return merged

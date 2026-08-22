@@ -4,3 +4,6 @@ openpyxl
 pulp
 numpy
 supabase
+nflreadpy
+requests
+pulp==3.3.0
