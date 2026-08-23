@@ -111,11 +111,40 @@ def get_player_baselines(seasons):
 def get_recent_baselines(seasons):
     """
     Return recent-weighted DFS player baselines.
+
+    Also preserves each player's latest historical team so the
+    2026 role layer can detect offseason team changes.
     """
 
     stats = get_dfs_player_stats(seasons)
+    baselines = build_recent_player_baselines(stats)
 
-    return build_recent_player_baselines(stats)
+    team_col = None
+    for candidate in ["recent_team", "team"]:
+        if candidate in stats.columns:
+            team_col = candidate
+            break
+
+    if team_col is not None:
+        latest_team = (
+            stats.sort_values(["player_display_name", "week"])
+            .groupby(["player_display_name", "position"], as_index=False)
+            .tail(1)[["player_display_name", "position", team_col]]
+            .rename(
+                columns={
+                    "player_display_name": "player",
+                    team_col: "historical_team",
+                }
+            )
+        )
+
+        baselines = baselines.merge(
+            latest_team,
+            on=["player", "position"],
+            how="left",
+        )
+
+    return baselines
 
 def get_recent_dst_baselines(seasons):
     """

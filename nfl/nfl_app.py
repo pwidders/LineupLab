@@ -25,6 +25,8 @@ from nfl.nflverse_loader import (
     get_recent_dst_baselines,
 )
 
+from nfl.role_adjustments import apply_role_adjustments
+
 from nfl.projections import (
     add_ll_projections,
     add_optimizer_scores,
@@ -330,6 +332,9 @@ try:
         baselines = get_recent_baselines([2025])
 
     players = merge_with_baselines(players, baselines)
+
+    # Week 1 / early-season 2026 role-transition layer
+    players = apply_role_adjustments(players)
     with st.spinner("Loading recent NFL defense baselines..."):
         dst_baselines = get_recent_dst_baselines([2025])
 
@@ -337,7 +342,7 @@ try:
         players,
         dst_baselines,
     )
-    players = add_ll_projections(players)
+    # Projection is calculated after Vegas/game environment is merged.
 
 except Exception as e:
     st.error(f"Could not load DraftKings salaries: {e}")

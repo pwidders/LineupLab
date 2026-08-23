@@ -1,6 +1,40 @@
 import pandas as pd
 
 
+NAME_ALIASES = {
+    "James Cook III": "James Cook",
+}
+
+
+def normalize_player_name(name):
+    """
+    Normalize player names for cross-source matching.
+
+    Removes punctuation and common suffixes so DraftKings names such as
+    'James Cook III' can match historical sources using 'James Cook'.
+    """
+    if pd.isna(name):
+        return ""
+
+    value = str(name).strip()
+    value = NAME_ALIASES.get(value, value)
+
+    value = (
+        value.replace(".", "")
+        .replace("'", "")
+        .replace("’", "")
+        .replace("-", " ")
+    )
+
+    parts = value.split()
+    suffixes = {"JR", "SR", "II", "III", "IV", "V"}
+
+    while parts and parts[-1].upper() in suffixes:
+        parts = parts[:-1]
+
+    return " ".join(parts).upper()
+
+
 REQUIRED_DK_COLUMNS = {
     "Position",
     "Name",
@@ -46,6 +80,7 @@ def load_dk_salaries(uploaded_file):
 
     # Clean basic fields
     df["player"] = df["player"].astype(str).str.strip()
+    df["player_match_key"] = df["player"].map(normalize_player_name)
     df["position"] = df["position"].astype(str).str.strip().str.upper()
     df["team"] = df["team"].astype(str).str.strip().str.upper()
 
@@ -119,12 +154,53 @@ def merge_with_dst_baselines(players, dst_baselines):
 def merge_with_baselines(dk_players, baselines):
     """
     Merge current DraftKings slate players with historical/recent NFL baselines.
+
+    Matching order:
+      1. exact player + position match
+      2. normalized name + position fallback
     """
 
-    merged = dk_players.merge(
-        baselines,
+    # Reset indices because the app may have filtered OUT players before this
+    # merge, leaving gaps in the DraftKings dataframe index. Boolean masks built
+    # from the merged dataframe must align positionally with this dataframe.
+    left = dk_players.copy().reset_index(drop=True)
+    right = baselines.copy().reset_index(drop=True)
+
+    if "player_match_key" not in left.columns:
+        left["player_match_key"] = left["player"].map(normalize_player_name)
+
+    right["player_match_key"] = right["player"].map(normalize_player_name)
+
+    merged = left.merge(
+        right,
         on=["player", "position"],
         how="left",
+        suffixes=("", "_baseline"),
     )
 
-    return merged
+    baseline_value_cols = [
+        c for c in right.columns
+        if c not in {"player", "position", "player_match_key"}
+    ]
+
+    if baseline_value_cols:
+        missing_mask = merged[baseline_value_cols].isna().all(axis=1)
+    else:
+        missing_mask = pd.Series(False, index=merged.index)
+
+    if missing_mask.any():
+        fallback_left = left.iloc[
+            missing_mask.to_numpy().nonzero()[0]
+        ][["player_match_key", "position"]].copy()
+
+        fallback = fallback_left.merge(
+            right.drop(columns=["player"]),
+            on=["player_match_key", "position"],
+            how="left",
+        )
+
+        for col in baseline_value_cols:
+            if col in fallback.columns:
+                merged.loc[missing_mask, col] = fallback[col].values
+
+    return merged.drop(columns=["player_match_key"], errors="ignore")
