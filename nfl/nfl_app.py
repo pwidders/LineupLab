@@ -38,6 +38,11 @@ from nfl.odds_loader import (
     normalize_odds_teams,
 )
 
+from nfl.odds_store import (
+    save_latest_odds,
+    load_latest_odds,
+)
+
 from nfl.game_environment import (
     build_game_environment,
     merge_odds_into_environment,
@@ -48,6 +53,24 @@ from nfl.game_environment import (
 )
 
 from nfl.optimizer import optimize_lineup, optimize_portfolio
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_cached_nfl_odds(
+    api_key,
+    commence_time_from,
+    commence_time_to,
+):
+    """
+    Cache a successful Odds API response for 6 hours so normal
+    Streamlit widget reruns do not consume additional API credits.
+    """
+    odds = load_nfl_odds(
+        api_key,
+        commence_time_from,
+        commence_time_to,
+    )
+
+    return normalize_odds_teams(odds)
 
 st.set_page_config(
     page_title="LineupLab NFL",
@@ -366,19 +389,56 @@ st.divider()
 
 game_environment = build_game_environment(players)
 
+odds = None
+odds_source = None
+
 with st.spinner("Loading NFL Vegas lines..."):
-    odds = load_nfl_odds(
-        st.secrets["ODDS_API_KEY"],
-        "2026-09-13T00:00:00Z",
-        "2026-09-14T04:00:00Z",
+
+    # First try to get fresh odds from The Odds API.
+    try:
+        odds = get_cached_nfl_odds(
+            st.secrets["ODDS_API_KEY"],
+            "2026-09-13T00:00:00Z",
+            "2026-09-14T04:00:00Z",
+        )
+
+        if odds is not None and not odds.empty:
+            save_latest_odds(odds)
+            odds_source = "fresh"
+
+    except Exception:
+        # API unavailable / credits exhausted:
+        # fall back to the most recently successful odds pull.
+        try:
+            odds = load_latest_odds()
+
+            if odds is not None and not odds.empty:
+                odds_source = "saved"
+
+        except Exception:
+            odds = None
+            odds_source = None
+
+
+if odds_source == "fresh":
+    st.success("🟢 Loaded fresh NFL Vegas lines.")
+
+elif odds_source == "saved":
+    st.warning(
+        "🟡 Odds API unavailable — using previously saved Vegas lines."
     )
 
-    odds = normalize_odds_teams(odds)
+else:
+    st.warning(
+        "🔴 No Vegas odds are currently available. "
+        "LineupLab will continue without Vegas adjustments."
+    )
 
-game_environment = merge_odds_into_environment(
-    game_environment,
-    odds,
-)
+if odds is not None and not odds.empty:
+    game_environment = merge_odds_into_environment(
+        game_environment,
+        odds,
+    )
 
 game_environment = add_game_script_score(
     game_environment
