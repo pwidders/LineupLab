@@ -36,6 +36,7 @@ from nfl.projections import (
 from nfl.odds_loader import (
     load_nfl_odds,
     normalize_odds_teams,
+    load_manual_test_odds,
 )
 
 from nfl.odds_store import (
@@ -416,8 +417,14 @@ with st.spinner("Loading NFL Vegas lines..."):
                 odds_source = "saved"
 
         except Exception:
-            odds = None
-            odds_source = None
+            # No saved odds available, so use temporary manual Week 1 test lines.
+            odds = load_manual_test_odds()
+
+            if odds is not None and not odds.empty:
+                odds_source = "manual"
+            else:
+                odds = None
+                odds_source = None
 
 
 if odds_source == "fresh":
@@ -426,6 +433,11 @@ if odds_source == "fresh":
 elif odds_source == "saved":
     st.warning(
         "🟡 Odds API unavailable — using previously saved Vegas lines."
+    )
+
+elif odds_source == "manual":
+    st.info(
+        "🧪 Using manually entered Week 1 Vegas lines for testing."
     )
 
 else:

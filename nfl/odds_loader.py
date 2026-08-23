@@ -146,3 +146,87 @@ def normalize_odds_teams(odds_df):
     df["away_team"] = df["away_team_name"].map(TEAM_NAME_TO_ABBREV)
 
     return df
+
+def load_manual_test_odds():
+    """
+    Temporary Week 1 test odds used only when:
+      1. The Odds API is unavailable, and
+      2. No previously saved odds exist.
+
+    These are test fixtures for LineupLab development.
+    """
+
+    rows = [
+        {
+            "home_team": "DET",
+            "away_team": "NO",
+            "game_total": 48.5,
+            "home_spread": -7.0,
+            "away_spread": 7.0,
+        },
+        {
+            "home_team": "CIN",
+            "away_team": "TB",
+            "game_total": 51.5,
+            "home_spread": -3.5,
+            "away_spread": 3.5,
+        },
+        {
+            "home_team": "PIT",
+            "away_team": "ATL",
+            "game_total": 42.5,
+            "home_spread": -3.0,
+            "away_spread": 3.0,
+        },
+        {
+            "home_team": "IND",
+            "away_team": "BAL",
+            "game_total": 48.5,
+            "home_spread": 3.5,
+            "away_spread": -3.5,
+        },
+        {
+            "home_team": "MIN",
+            "away_team": "GB",
+            "game_total": 45.5,
+            "home_spread": -1.5,
+            "away_spread": 1.5,
+        },
+        {
+            "home_team": "HOU",
+            "away_team": "BUF",
+            "game_total": 44.5,
+            "home_spread": 1.5,
+            "away_spread": -1.5,
+        },
+        {
+            "home_team": "MIA",
+            "away_team": "LV",
+            "game_total": 40.5,
+            "home_spread": 3.5,
+            "away_spread": -3.5,
+        },
+        {
+            "home_team": "PHI",
+            "away_team": "WAS",
+            "game_total": 47.5,
+            "home_spread": -4.5,
+            "away_spread": 4.5,
+        },
+        {
+            "home_team": "TEN",
+            "away_team": "NYJ",
+            "game_total": 38.5,
+            "home_spread": -3.0,
+            "away_spread": 3.0,
+        },
+        {
+            "home_team": "JAX",
+            "away_team": "CLE",
+            "game_total": 40.5,
+            "home_spread": -7.5,
+            "away_spread": 7.5,
+        },
+    ]
+
+    return pd.DataFrame(rows)
