@@ -17,6 +17,7 @@ def optimize_lineup(
     excluded_dk_ids=None,
     diversify_repeated_qb_stacks=False,
     min_stack_partner_gpp_score=0,
+    te_flex_penalty=1.5,
 ):
     """
     Optimize a DraftKings NFL classic lineup using PuLP/CBC.
@@ -30,8 +31,13 @@ def optimize_lineup(
       1 FLEX (RB/WR/TE)
 
     Strategy:
-      Cash -> maximize cash_projection
-      GPP  -> maximize gpp_projection
+      Cash   -> maximize cash_projection
+      Hybrid -> maximize 60% cash_projection + 40% gpp_projection
+      GPP    -> maximize gpp_projection
+
+    FLEX:
+      A small penalty is applied to selecting a second TE so RB/WR is preferred
+      at FLEX unless the second TE has a clear projection advantage.
     """
 
     if qb_stack_size not in (1, 2):
@@ -39,6 +45,9 @@ def optimize_lineup(
 
     if min_stack_partner_gpp_score < 0:
         raise ValueError("min_stack_partner_gpp_score must be >= 0.")
+
+    if te_flex_penalty < 0:
+        raise ValueError("te_flex_penalty must be >= 0.")
 
     df = players.copy().reset_index(drop=True)
 
@@ -106,15 +115,33 @@ def optimize_lineup(
         & (df["ll_projection"] > 0)
     ].copy()
 
-    objective_col = (
-        "cash_projection"
-        if strategy == "Cash"
-        else "gpp_projection"
+    # Defense in depth: never allow ruled-out players into an optimized lineup,
+    # even if optimize_lineup() is called outside the Streamlit app.
+    if "status" in df.columns:
+        normalized_status = (
+            df["status"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+        )
+        df = df.loc[~normalized_status.isin({"OUT", "O"})].copy()
+
+    df["hybrid_projection"] = (
+        df["cash_projection"].fillna(0) * 0.60
+        + df["gpp_projection"].fillna(0) * 0.40
     )
 
-    df[objective_col] = df[
-        objective_col
-    ].fillna(0)
+    if strategy == "Cash":
+        objective_col = "cash_projection"
+    elif strategy == "Hybrid":
+        objective_col = "hybrid_projection"
+    elif strategy == "GPP":
+        objective_col = "gpp_projection"
+    else:
+        raise ValueError("strategy must be Cash, Hybrid, or GPP.")
+
+    df[objective_col] = df[objective_col].fillna(0)
 
     # --------------------------------
     # Optimization model
@@ -137,10 +164,21 @@ def optimize_lineup(
     # Objective
     # --------------------------------
 
-    model += pulp.lpSum(
+    base_objective = pulp.lpSum(
         x[i] * float(df.loc[i, objective_col])
         for i in df.index
     )
+
+    # DraftKings requires at least one TE. Penalizing total TE count by a fixed
+    # amount is therefore equivalent to penalizing only the *second* TE.
+    # This discourages TE at FLEX without banning it.
+    te_count = pulp.lpSum(
+        x[i]
+        for i in df.index
+        if df.loc[i, "position"] == "TE"
+    )
+
+    model += base_objective - (float(te_flex_penalty) * te_count)
 
     # --------------------------------
     # Explicit exclusions
@@ -461,6 +499,7 @@ def optimize_lineup(
                 "cash_score": player["cash_score"],
                 "gpp_score": player["gpp_score"],
                 "cash_projection": player["cash_projection"],
+                "hybrid_projection": player["hybrid_projection"],
                 "gpp_projection": player["gpp_projection"],
                 "dk_id": player["dk_id"],
             }
@@ -478,12 +517,14 @@ def optimize_lineup(
 
     lineup_df.attrs["strategy"] = strategy
 
+    strategy_projection_col = {
+        "Cash": "cash_projection",
+        "Hybrid": "hybrid_projection",
+        "GPP": "gpp_projection",
+    }[strategy]
+
     lineup_df.attrs["optimizer_score"] = (
-        lineup_df[
-            "cash_projection"
-            if strategy == "Cash"
-            else "gpp_projection"
-        ].sum()
+        lineup_df[strategy_projection_col].sum()
     )
 
     return lineup_df
@@ -504,6 +545,7 @@ def optimize_portfolio(
     max_auto_core_players=2,
     diversify_qb_stacks=True,
     min_stack_partner_gpp_score=0,
+    te_flex_penalty=1.5,
 ):
     """
     Build multiple optimized NFL lineups with pairwise overlap limits
@@ -542,12 +584,11 @@ def optimize_portfolio(
         str(k): int(v) for k, v in (player_exposure_limits or {}).items()
     }
 
-    # Automatic exposure tiers are based on GPP score.
+    # Automatic exposure tiers.
     # Manual limits always override the automatic tier.
     #
     # Auto Core: top non-QB 95+ plays -> max 3 lineups
     # All other players -> max 2 lineups
-    # Manual overrides always take priority
     auto_exposure_limits = {}
 
     if use_auto_exposure_tiers:
@@ -616,6 +657,7 @@ def optimize_portfolio(
             excluded_dk_ids=blocked_qb_ids | blocked_player_ids,
             diversify_repeated_qb_stacks=diversify_qb_stacks,
             min_stack_partner_gpp_score=min_stack_partner_gpp_score,
+            te_flex_penalty=te_flex_penalty,
         )
 
         if lineup is None:
