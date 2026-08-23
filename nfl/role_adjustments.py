@@ -29,6 +29,17 @@ ROLE_PRIORS = {
     },
 }
 
+# QB role overrides for early-season / depth-chart uncertainty.
+#
+# "starter" = eligible for LineupLab's starting-QB workload fallback
+# "backup"  = never eligible for the optimizer unless this is changed
+#
+# Add/update players here as depth charts change.
+QB_ROLE_OVERRIDES = {
+    "Tyler Shough": "starter",
+    "Luke Altmyer": "backup",
+}
+
 
 def _salary_tier(position, salary):
     """Position-specific DK salary tier used only as an early-season role prior."""
@@ -102,6 +113,8 @@ def apply_role_adjustments(players):
     players["role_source"] = "2025 recent baseline"
     players["role_adjustment"] = "stable"
     players["role_prior_weight"] = 0.10
+    players["optimizer_eligible"] = True
+    players["qb_starter_verified"] = True
 
     for idx, row in players.iterrows():
         pos = row.get("position")
@@ -121,6 +134,31 @@ def apply_role_adjustments(players):
         )
 
         if not has_history:
+
+            if pos == "QB":
+                player_name = row.get("player")
+                qb_role = QB_ROLE_OVERRIDES.get(player_name)
+
+                # Explicitly identified backup
+                if qb_role == "backup":
+                    players.at[idx, "qb_starter_verified"] = False
+                    players.at[idx, "optimizer_eligible"] = False
+                    players.at[idx, "role_source"] = "QB depth-chart override"
+                    players.at[idx, "role_adjustment"] = "confirmed / expected backup"
+                    players.at[idx, "role_prior_weight"] = 0.0
+                    continue
+
+                # No NFL history and not explicitly confirmed as a starter
+                if qb_role != "starter":
+                    players.at[idx, "qb_starter_verified"] = False
+                    players.at[idx, "optimizer_eligible"] = False
+                    players.at[idx, "role_source"] = "unverified QB role"
+                    players.at[idx, "role_adjustment"] = "starter status unverified"
+                    players.at[idx, "role_prior_weight"] = 0.0
+                    continue
+
+                players.at[idx, "qb_starter_verified"] = True
+
             prior_weight = 1.0
             source = "2026 salary-tier fallback (true no-history / unmatched)"
             adjustment = "no 2025 usable history"

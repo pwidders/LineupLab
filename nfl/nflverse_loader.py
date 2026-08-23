@@ -48,6 +48,16 @@ def get_dfs_player_stats(seasons):
     """
     df = load_weekly_player_stats(seasons)
 
+    # Exclude preseason/postseason data from player baselines.
+    if "season_type" in df.columns:
+        df = df[
+            df["season_type"]
+            .fillna("")
+            .astype(str)
+            .str.upper()
+            .eq("REG")
+        ].copy()
+
     df = df[df["position"].isin(DFS_POSITIONS)].copy()
 
     return df.reset_index(drop=True)

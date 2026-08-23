@@ -50,6 +50,17 @@ def optimize_lineup(
         raise ValueError("te_flex_penalty must be >= 0.")
 
     df = players.copy().reset_index(drop=True)
+    df = players.copy().reset_index(drop=True)
+
+    # Remove players who are not eligible for optimization
+    if "optimizer_eligible" in df.columns:
+        df = df[
+            df["optimizer_eligible"]
+            .fillna(True)
+            .astype(bool)
+        ].copy()
+
+    # ------------------------------
 
     # --------------------------------
     # Clean player pool
