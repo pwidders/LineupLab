@@ -188,6 +188,57 @@ st.markdown(
         color: #dfffb3;
         margin-top: .75rem;
     }
+        /* =========================================================
+    LINEUPLAB NFL — INPUT / DROPDOWN READABILITY
+    ========================================================= */
+
+    /* Selectbox / dropdown selected value */
+    div[data-baseweb="select"] > div {
+        background-color: #12263a !important;
+        border-color: #29445f !important;
+        color: #f5f7fa !important;
+    }
+
+    div[data-baseweb="select"] span {
+        color: #f5f7fa !important;
+        -webkit-text-fill-color: #f5f7fa !important;
+    }
+
+    /* Dropdown arrow */
+    div[data-baseweb="select"] svg {
+        fill: #76d600 !important;
+        color: #76d600 !important;
+    }
+
+    /* Number inputs */
+    div[data-testid="stNumberInput"] input {
+        background-color: #12263a !important;
+        color: #f5f7fa !important;
+        -webkit-text-fill-color: #f5f7fa !important;
+        opacity: 1 !important;
+    }
+
+    /* +/- controls */
+    div[data-testid="stNumberInput"] button {
+        background-color: #12263a !important;
+        color: #76d600 !important;
+    }
+
+    div[data-testid="stNumberInput"] button svg {
+        fill: #76d600 !important;
+    }
+
+    /* Multiselect text */
+    div[data-baseweb="select"] input {
+        color: #f5f7fa !important;
+        -webkit-text-fill-color: #f5f7fa !important;
+    }
+
+    /* Placeholder text */
+    div[data-baseweb="select"] input::placeholder {
+        color: #aebdca !important;
+        opacity: 1 !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -400,6 +451,10 @@ ranking_position = st.selectbox(
     "Ranking Position",
     ["QB", "RB", "WR", "TE", "DST"],
     index=1,
+    help=(
+        "Choose which position to rank using LineupLab's projection, value, "
+        "floor, ceiling, Cash score, and GPP score."
+    ),
 )
 
 ranking_cols = [
@@ -483,8 +538,21 @@ st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
 strategy = st.selectbox(
     "Strategy",
-    ["Cash", "GPP"],
+    ["Cash", "Hybrid", "GPP"],
+    help=(
+        "Controls how LineupLab evaluates players. Cash emphasizes floor and "
+        "consistency, Hybrid balances safety and upside, and GPP emphasizes "
+        "ceiling and tournament potential."
+    ),
 )
+
+strategy_help = {
+    "Cash": "Prioritizes stability, floor, and high-probability scoring for double-ups and cash games.",
+    "Hybrid": "Balances cash-game safety with GPP upside — ideal for a lineup being entered in both a double-up and GPP.",
+    "GPP": "Prioritizes ceiling, correlation, and tournament upside over pure consistency.",
+}
+
+st.caption(strategy_help[strategy])
 
 min_salary = st.number_input(
     "Minimum Salary",
@@ -492,6 +560,10 @@ min_salary = st.number_input(
     max_value=50000,
     value=49000,
     step=100,
+    help=(
+        "Minimum total salary the optimizer must spend. Lowering this gives "
+        "LineupLab more flexibility and may uncover stronger value combinations."
+    ),
 )
 
 require_qb_stack = False
@@ -499,15 +571,19 @@ qb_stack_size = 1
 min_stack_partner_gpp_score = 0.0
 require_dst_rb = False
 
-if strategy == "GPP":
+if strategy in ["Hybrid", "GPP"]:
 
     require_qb_stack = st.checkbox(
         "Require QB + WR/TE stack",
         value=True,
+        help=(
+            "Requires the quarterback to be paired with at least one same-team "
+            "WR or TE to capture correlated scoring."
+        ),
     )
 
     qb_stack_size = st.selectbox(
-        "QB Stack Size",
+        "Portfolio QB Stack Size",
         options=[1, 2],
         index=0,
         format_func=lambda value: (
@@ -515,7 +591,10 @@ if strategy == "GPP":
             if value == 1
             else "QB + 2 pass catchers"
         ),
-        help="Minimum number of same-team WR/TE players required with the QB.",
+        help=(
+            "Choose whether each quarterback must be paired with one or two "
+            "same-team WR/TE pass catchers."
+        ),
         disabled=not require_qb_stack,
     )
 
@@ -534,7 +613,12 @@ if strategy == "GPP":
 
     require_dst_rb = st.checkbox(
         "Pair DST with same-team RB",
-        value=True,
+        value=(strategy == "GPP"),
+        help=(
+            "Pairs a defense with a running back from the same team, targeting "
+            "favorable game scripts where the team leads and runs more. "
+            "Defaults on for GPP and off for Hybrid."
+        ),
     )
 
 if st.button("Build Lineup", type="primary", use_container_width=False):
@@ -618,9 +702,37 @@ if st.button("Build Lineup", type="primary", use_container_width=False):
 st.subheader("3-Lineup Portfolio Builder")
 st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 st.caption(
-    "Build three correlated GPP lineups while limiting player overlap "
-    "between every pair of lineups."
+    "Build three related lineups while controlling overlap, exposure, and stacking."
 )
+
+portfolio_strategy = st.selectbox(
+    "Portfolio Strategy",
+    ["Cash", "Hybrid", "GPP"],
+    index=1,
+    key="portfolio_strategy",
+    help=(
+        "Controls how all three portfolio lineups are optimized. Cash emphasizes "
+        "stability, Hybrid balances safety and upside, and GPP emphasizes ceiling "
+        "and tournament potential."
+    ),
+)
+
+portfolio_strategy_help = {
+    "Cash": (
+        "Three stability-first lineups designed around floor, consistency, "
+        "and high-probability scoring."
+    ),
+    "Hybrid": (
+        "Three balanced lineups designed to pull double duty in both double-ups "
+        "and small-field / 3-max GPPs."
+    ),
+    "GPP": (
+        "Three tournament-focused lineups emphasizing ceiling, correlation, "
+        "and differentiated upside."
+    ),
+}
+
+st.caption(portfolio_strategy_help[portfolio_strategy])
 
 portfolio_col1, portfolio_col2, portfolio_col3 = st.columns(3)
 
@@ -632,6 +744,10 @@ with portfolio_col1:
         value=49000,
         step=100,
         key="portfolio_min_salary",
+        help=(
+            "Minimum total salary each portfolio lineup must spend. Lowering "
+            "this gives the optimizer more flexibility and can create more diversity."
+        ),
     )
 
 with portfolio_col2:
@@ -642,7 +758,11 @@ with portfolio_col2:
         value=6,
         step=1,
         key="portfolio_max_overlap",
-        help="Maximum number of players any two portfolio lineups may share.",
+        help=(
+            "Maximum number of players any two portfolio lineups may share. "
+            "Lower values create more diversity; higher values preserve more of "
+            "your strongest core."
+        ),
     )
 
 with portfolio_col3:
@@ -653,7 +773,10 @@ with portfolio_col3:
         value=2,
         step=1,
         key="portfolio_max_qb_exposure",
-        help="Maximum number of the 3 portfolio lineups that may use the same QB.",
+        help=(
+            "Maximum number of the three portfolio lineups that may use the same "
+            "quarterback. A value of 2 prevents one QB from appearing in all three."
+        ),
     )
 
 st.markdown("#### Automatic Exposure Tiers")
@@ -663,9 +786,9 @@ use_auto_exposure_tiers = st.checkbox(
     value=True,
     key="portfolio_auto_exposure",
     help=(
-        "Elite/Core (GPP score 95+) may appear in 3 lineups; "
-        "Strong (90-94.9) in up to 2; Secondary (<90) in up to 1. "
-        "Manual player overrides below take priority."
+        "Lets LineupLab automatically control player exposure across the three "
+        "lineups using its player scores. Stronger plays may appear more often, "
+        "while weaker plays are naturally capped. Manual overrides take priority."
     ),
 )
 
@@ -684,8 +807,9 @@ if use_auto_exposure_tiers:
         step=1,
         key="portfolio_max_auto_core_players",
         help=(
-            "Maximum number of top 95+ non-QB plays labeled as Auto Core. "
-            "QB exposure is handled separately. Manual 100% overrides are unaffected."
+            "Maximum number of elite non-QB players LineupLab may designate as "
+            "automatic core plays that are allowed to appear in all three lineups. "
+            "QB exposure is handled separately."
         ),
     )
 else:
@@ -705,7 +829,13 @@ exposure_options = {
     for _, r in exposure_candidates.iterrows()
 }
 selected_exposure_players = st.multiselect(
-    "Players to cap", list(exposure_options.keys()), key="portfolio_exposure_players"
+    "Players to cap",
+    list(exposure_options.keys()),
+    key="portfolio_exposure_players",
+    help=(
+        "Manually control exposure for specific players. After selecting a player, "
+        "set 100% = 3 lineups, 67% = 2, 33% = 1, or 0% = exclude."
+    ),
 )
 player_exposure_limits = {}
 for label in selected_exposure_players:
@@ -720,6 +850,10 @@ portfolio_qb_stack = st.checkbox(
     "Require QB + WR/TE stack in every portfolio lineup",
     value=True,
     key="portfolio_qb_stack",
+    help=(
+        "Requires every portfolio QB to be paired with at least one same-team "
+        "WR or TE so the lineup captures correlated passing-game scoring."
+    ),
 )
 
 portfolio_qb_stack_size = st.selectbox(
@@ -763,8 +897,13 @@ portfolio_diversify_qb_stacks = st.checkbox(
 
 portfolio_dst_rb = st.checkbox(
     "Pair DST with same-team RB in every portfolio lineup",
-    value=True,
+    value=(portfolio_strategy == "GPP"),
     key="portfolio_dst_rb",
+    help=(
+        "Requires each defense to be paired with a running back from the same team. "
+        "This targets positive game-script correlation. Defaults on for GPP and "
+        "off for Cash/Hybrid."
+    ),
 )
 
 st.markdown(
@@ -777,12 +916,12 @@ if st.button(
     type="primary",
 ):
 
-    with st.spinner("Building 3-lineup GPP portfolio..."):
+    with st.spinner(f"Building 3-lineup {portfolio_strategy} portfolio..."):
 
         portfolio = optimize_portfolio(
             players,
             num_lineups=3,
-            strategy="GPP",
+            strategy=portfolio_strategy,
             min_salary=portfolio_min_salary,
             require_qb_stack=portfolio_qb_stack,
             qb_stack_size=int(portfolio_qb_stack_size),
@@ -811,7 +950,7 @@ if st.button(
                 "with the current constraints."
             )
         else:
-            st.success("3-lineup GPP portfolio built!")
+            st.success(f"3-lineup {portfolio_strategy} portfolio built!")
 
         portfolio_ids = []
 
@@ -857,7 +996,7 @@ if st.button(
             )
 
             metric4.metric(
-                "GPP Projection",
+                f"{portfolio_strategy} Strategy Projection",
                 f"{portfolio_lineup.attrs['optimizer_score']:.1f}",
             )
 
@@ -1029,6 +1168,7 @@ position_filter = st.multiselect(
     "Position",
     ["QB", "RB", "WR", "TE", "DST"],
     default=["QB", "RB", "WR", "TE", "DST"],
+    help="Filter the player-pool table by position. This does not exclude players from the optimizer.",
 )
 
 filtered = players[
