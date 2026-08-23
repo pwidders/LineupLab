@@ -786,17 +786,17 @@ use_auto_exposure_tiers = st.checkbox(
     value=True,
     key="portfolio_auto_exposure",
     help=(
-        "Lets LineupLab automatically control player exposure across the three "
-        "lineups using its player scores. Stronger plays may appear more often, "
-        "while weaker plays are naturally capped. Manual overrides take priority."
+        "Automatically manages exposure across the three-lineup portfolio. "
+        "Only designated Auto Core players may appear in all 3 lineups; "
+        "all other players are capped at 2. Manual overrides take priority."
     ),
 )
 
 if use_auto_exposure_tiers:
     st.caption(
-        "Balanced auto tiers: top non-QB Auto Core plays may reach 100%; "
-        "other 90+ plays may also reach 100%; under-90 plays are capped at 67%. "
-        "QB exposure is controlled separately. Manual overrides supersede these caps."
+        "Balanced auto tiers: only the top non-QB Auto Core plays may reach 100%; "
+        "all other players are capped at 67%. QB exposure is controlled separately. "
+        "Manual overrides supersede these caps."
     )
 
     max_auto_core_players = st.number_input(

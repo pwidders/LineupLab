@@ -545,9 +545,9 @@ def optimize_portfolio(
     # Automatic exposure tiers are based on GPP score.
     # Manual limits always override the automatic tier.
     #
-    # Auto Core:    top non-QB 95+ plays -> max 3 lineups
-    # Strong:       GPP score >= 90 -> max 3 lineups
-    # Secondary:    GPP score <  90 -> max 2 lineups
+    # Auto Core: top non-QB 95+ plays -> max 3 lineups
+    # All other players -> max 2 lineups
+    # Manual overrides always take priority
     auto_exposure_limits = {}
 
     if use_auto_exposure_tiers:
@@ -584,8 +584,6 @@ def optimize_portfolio(
                 continue
 
             if player_id in auto_core_ids:
-                cap = 3
-            elif gpp_score >= 90:
                 cap = 3
             else:
                 cap = 2
