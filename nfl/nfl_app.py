@@ -1,18 +1,23 @@
 import streamlit as st
 from pathlib import Path
 import sys
+from io import BytesIO
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import pandas as pd
 
 from nfl.data_loader import (
     load_dk_salaries,
     merge_with_baselines,
     merge_with_dst_baselines,
+)
+
+from nfl.salary_store import (
+    load_latest_salary_file,
+    save_latest_salary_file,
 )
 
 from nfl.nflverse_loader import (
@@ -48,17 +53,203 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🏈 LineupLab NFL")
-st.caption("NFL DFS Projection & Portfolio Lab")
+# -----------------------------
+# LineupLab NFL visual theme
+# -----------------------------
+st.markdown(
+    """
+    <style>
+    :root {
+        --ll-bg: #07111f;
+        --ll-panel: #0d1a2a;
+        --ll-panel-2: #122235;
+        --ll-border: #23384f;
+        --ll-green: #76d400;
+        --ll-green-2: #9be329;
+        --ll-text: #f5f7fa;
+        --ll-muted: #9eabb9;
+    }
 
-st.divider()
+    .stApp {
+        background:
+            radial-gradient(circle at top right, rgba(118,212,0,0.06), transparent 28%),
+            linear-gradient(180deg, #07111f 0%, #091522 100%);
+        color: var(--ll-text);
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(7,17,31,0.88);
+        backdrop-filter: blur(8px);
+    }
+
+    [data-testid="stToolbar"] {
+        right: 1rem;
+    }
+
+    .block-container {
+        max-width: 1550px;
+        padding-top: 1.4rem;
+        padding-bottom: 3rem;
+    }
+
+    h1, h2, h3, h4 {
+        color: var(--ll-text) !important;
+        letter-spacing: -0.01em;
+    }
+
+    p, label, .stCaption {
+        color: var(--ll-muted);
+    }
+
+    [data-testid="stMetric"] {
+        background: linear-gradient(180deg, rgba(18,34,53,.96), rgba(13,26,42,.96));
+        border: 1px solid var(--ll-border);
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        box-shadow: 0 8px 24px rgba(0,0,0,.15);
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: var(--ll-muted);
+    }
+
+    [data-testid="stMetricValue"] {
+        color: var(--ll-text);
+    }
+
+    div[data-testid="stDataFrame"] {
+        border: 1px solid var(--ll-border);
+        border-radius: 12px;
+        overflow: hidden;
+        background: var(--ll-panel);
+    }
+
+    .stSelectbox > div > div,
+    .stNumberInput > div > div,
+    .stMultiSelect > div > div,
+    .stFileUploader section {
+        background: var(--ll-panel-2);
+        border-color: var(--ll-border);
+        border-radius: 9px;
+    }
+
+    .stButton > button {
+        border-radius: 8px;
+        border: 1px solid #75d300;
+        background: linear-gradient(180deg, #5daf00, #3f8500);
+        color: white;
+        font-weight: 700;
+        min-height: 2.7rem;
+        box-shadow: 0 4px 14px rgba(118,212,0,.16);
+    }
+
+    .stButton > button:hover {
+        border-color: #a3ef38;
+        background: linear-gradient(180deg, #6bc400, #4d9800);
+        color: white;
+    }
+
+    div[data-testid="stAlert"] {
+        border-radius: 10px;
+        border: 1px solid var(--ll-border);
+    }
+
+    hr {
+        border-color: var(--ll-border) !important;
+    }
+
+    .ll-hero {
+        padding: 0.4rem 0 0.9rem 0;
+        border-bottom: 1px solid var(--ll-border);
+        margin-bottom: 1.6rem;
+    }
+
+    .ll-kicker {
+        color: var(--ll-muted);
+        font-size: 0.82rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        margin-top: -0.2rem;
+    }
+
+    .ll-section-rule {
+        height: 3px;
+        width: 56px;
+        background: linear-gradient(90deg, var(--ll-green), transparent);
+        margin: -0.25rem 0 0.9rem 0;
+        border-radius: 999px;
+    }
+
+    .ll-ready {
+        border: 1px solid rgba(118,212,0,.35);
+        background: rgba(118,212,0,.07);
+        border-radius: 10px;
+        padding: .75rem 1rem;
+        color: #dfffb3;
+        margin-top: .75rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+logo_path = ROOT_DIR / "assets" / "lineuplab_nfl_logo.png"
+
+st.markdown('<div class="ll-hero">', unsafe_allow_html=True)
+if logo_path.exists():
+    st.image(str(logo_path), width=500)
+else:
+    st.markdown("## 🏈 LineupLab NFL")
+st.markdown(
+    '<div class="ll-kicker">NFL DFS Projection & Portfolio Lab</div></div>',
+    unsafe_allow_html=True,
+)
 
 st.subheader("DraftKings Player Pool")
+st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader(
     "Upload DraftKings NFL salary CSV",
     type=["csv"],
 )
+
+# Save every manually uploaded DK salary file to Supabase so the same
+# slate is available from another device/session.
+if uploaded_file is not None:
+    file_bytes = uploaded_file.getvalue()
+    st.session_state["active_nfl_salary_bytes"] = file_bytes
+    st.session_state["active_nfl_salary_name"] = uploaded_file.name
+
+    try:
+        save_latest_salary_file(
+            file_bytes=file_bytes,
+            filename=uploaded_file.name,
+        )
+        st.caption("☁️ DraftKings salary sheet saved for cross-device use.")
+    except Exception as exc:
+        st.warning(f"Could not save salary sheet to cloud: {exc}")
+
+# If this browser/session has no upload, restore the latest cloud-saved file.
+if uploaded_file is None and "active_nfl_salary_bytes" not in st.session_state:
+    try:
+        saved_bytes, saved_name = load_latest_salary_file()
+        st.session_state["active_nfl_salary_bytes"] = saved_bytes
+        st.session_state["active_nfl_salary_name"] = saved_name
+    except Exception:
+        pass
+
+# Convert the persisted bytes back into a file-like object expected by
+# the existing DraftKings loader.
+if uploaded_file is None and "active_nfl_salary_bytes" in st.session_state:
+    uploaded_file = BytesIO(st.session_state["active_nfl_salary_bytes"])
+    uploaded_file.name = st.session_state.get(
+        "active_nfl_salary_name",
+        "latest_nfl_dk_salaries.csv",
+    )
+    st.info(
+        f"📲 Loaded saved DraftKings salary sheet: "
+        f"{uploaded_file.name}"
+    )
 
 if uploaded_file is None:
     st.info("Upload a DraftKings NFL salary CSV to begin.")
@@ -130,6 +321,7 @@ players = add_optimizer_scores(players)
 players = add_strategy_projections(players)
 
 st.subheader("Game Environment")
+st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
 st.dataframe(
     game_environment,
@@ -138,6 +330,7 @@ st.dataframe(
 )
 
 st.subheader("DST / RB Pairings")
+st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
 pairings = build_dst_rb_pairings(
     players,
@@ -166,6 +359,7 @@ st.dataframe(
 )
 
 st.subheader("QB / Pass Catcher Stacks")
+st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
 stacks = build_qb_pass_catcher_stacks(players)
 
@@ -200,6 +394,7 @@ st.dataframe(
 # -----------------------------
 
 st.subheader("Optimizer Rankings")
+st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
 ranking_position = st.selectbox(
     "Ranking Position",
@@ -284,6 +479,7 @@ st.dataframe(
 # -------------------------
 
 st.subheader("Lineup Optimizer")
+st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
 strategy = st.selectbox(
     "Strategy",
@@ -341,7 +537,7 @@ if strategy == "GPP":
         value=True,
     )
 
-if st.button("Build Lineup"):
+if st.button("Build Lineup", type="primary", use_container_width=False):
 
     with st.spinner(
         f"Building {strategy} lineup..."
@@ -420,6 +616,7 @@ if st.button("Build Lineup"):
 # -------------------------
 
 st.subheader("3-Lineup Portfolio Builder")
+st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 st.caption(
     "Build three correlated GPP lineups while limiting player overlap "
     "between every pair of lineups."
@@ -568,6 +765,11 @@ portfolio_dst_rb = st.checkbox(
     "Pair DST with same-team RB in every portfolio lineup",
     value=True,
     key="portfolio_dst_rb",
+)
+
+st.markdown(
+    '<div class="ll-ready">Ready to optimize — review the portfolio controls, then build your three-lineup set.</div>',
+    unsafe_allow_html=True,
 )
 
 if st.button(
