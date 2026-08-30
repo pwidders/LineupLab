@@ -1,6 +1,7 @@
 import streamlit as st
 from pathlib import Path
 import sys
+import pandas as pd
 from io import BytesIO
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -42,6 +43,7 @@ from nfl.odds_loader import (
 from nfl.odds_store import (
     save_latest_odds,
     load_latest_odds,
+    load_latest_odds_with_meta,
 )
 
 from nfl.game_environment import (
@@ -54,24 +56,6 @@ from nfl.game_environment import (
 )
 
 from nfl.optimizer import optimize_lineup, optimize_portfolio
-
-@st.cache_data(ttl=21600, show_spinner=False)
-def get_cached_nfl_odds(
-    api_key,
-    commence_time_from,
-    commence_time_to,
-):
-    """
-    Cache a successful Odds API response for 6 hours so normal
-    Streamlit widget reruns do not consume additional API credits.
-    """
-    odds = load_nfl_odds(
-        api_key,
-        commence_time_from,
-        commence_time_to,
-    )
-
-    return normalize_odds_teams(odds)
 
 st.set_page_config(
     page_title="LineupLab NFL",
@@ -392,52 +376,112 @@ game_environment = build_game_environment(players)
 
 odds = None
 odds_source = None
+odds_refreshed_at = None
 
-with st.spinner("Loading NFL Vegas lines..."):
+st.subheader("Vegas Odds")
+st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
-    # First try to get fresh odds from The Odds API.
+st.caption(
+    "LineupLab uses the most recently saved Vegas snapshot by default. "
+    "The Odds API is called only when you click Refresh Vegas Odds."
+)
+
+refresh_odds = st.button(
+    "🔄 Refresh Vegas Odds",
+    key="refresh_nfl_vegas_odds",
+    help=(
+        "Makes one live Odds API request for the configured NFL slate, "
+        "then saves that snapshot for reuse across reruns and devices."
+    ),
+)
+
+if refresh_odds:
+    with st.spinner("Refreshing NFL Vegas lines..."):
+        try:
+            fresh_odds = load_nfl_odds(
+                st.secrets["ODDS_API_KEY"],
+                "2026-09-13T00:00:00Z",
+                "2026-09-14T04:00:00Z",
+            )
+
+            fresh_odds = normalize_odds_teams(fresh_odds)
+
+            if fresh_odds is None or fresh_odds.empty:
+                st.warning(
+                    "The Odds API returned no games. "
+                    "Keeping the previously saved snapshot."
+                )
+            else:
+                save_latest_odds(fresh_odds)
+                odds = fresh_odds
+                odds_source = "fresh"
+
+                try:
+                    _, odds_refreshed_at = load_latest_odds_with_meta()
+                except Exception:
+                    odds_refreshed_at = None
+
+                st.success(
+                    "🟢 Vegas odds refreshed and saved. "
+                    "No additional API calls will occur until you "
+                    "press Refresh Vegas Odds again."
+                )
+
+        except Exception as exc:
+            st.error(
+                "Could not refresh Vegas odds. "
+                f"The saved snapshot will be used instead. ({exc})"
+            )
+
+# Normal Streamlit reruns only read the saved snapshot.
+if odds is None or odds.empty:
     try:
-        odds = get_cached_nfl_odds(
-            st.secrets["ODDS_API_KEY"],
-            "2026-09-13T00:00:00Z",
-            "2026-09-14T04:00:00Z",
-        )
+        odds, odds_refreshed_at = load_latest_odds_with_meta()
 
         if odds is not None and not odds.empty:
-            save_latest_odds(odds)
-            odds_source = "fresh"
+            odds_source = "saved"
 
     except Exception:
-        # API unavailable / credits exhausted:
-        # fall back to the most recently successful odds pull.
+        odds = None
+
+# Development fallback only when no saved snapshot exists.
+if odds is None or odds.empty:
+    odds = load_manual_test_odds()
+
+    if odds is not None and not odds.empty:
+        odds_source = "manual"
+    else:
+        odds = None
+        odds_source = None
+
+if odds_source in {"fresh", "saved"}:
+    if odds_refreshed_at:
         try:
-            odds = load_latest_odds()
+            refreshed_dt = pd.to_datetime(
+                odds_refreshed_at,
+                utc=True,
+            ).tz_convert("America/Los_Angeles")
 
-            if odds is not None and not odds.empty:
-                odds_source = "saved"
-
+            refreshed_label = refreshed_dt.strftime(
+                "%b %d, %Y • %I:%M %p PT"
+            )
         except Exception:
-            # No saved odds available, so use temporary manual Week 1 test lines.
-            odds = load_manual_test_odds()
+            refreshed_label = str(odds_refreshed_at)
 
-            if odds is not None and not odds.empty:
-                odds_source = "manual"
-            else:
-                odds = None
-                odds_source = None
-
-
-if odds_source == "fresh":
-    st.success("🟢 Loaded fresh NFL Vegas lines.")
-
-elif odds_source == "saved":
-    st.warning(
-        "🟡 Odds API unavailable — using previously saved Vegas lines."
-    )
+        st.info(
+            f"🟡 Using saved Vegas snapshot • Last refreshed: "
+            f"**{refreshed_label}**"
+        )
+    else:
+        st.info(
+            "🟡 Using saved Vegas snapshot. "
+            "Refresh timestamp is unavailable for this legacy snapshot."
+        )
 
 elif odds_source == "manual":
     st.info(
-        "🧪 Using manually entered Week 1 Vegas lines for testing."
+        "🧪 No saved Vegas snapshot found — using manually entered "
+        "Week 1 test lines."
     )
 
 else:
