@@ -57,6 +57,11 @@ from nfl.game_environment import (
 
 from nfl.optimizer import optimize_lineup, optimize_portfolio
 
+from nfl.final_lineup_store import (
+    save_nfl_final_lineup,
+    list_nfl_final_lineups,
+)
+
 st.set_page_config(
     page_title="LineupLab NFL",
     page_icon="🏈",
@@ -792,6 +797,11 @@ if st.button("Build Lineup", type="primary", use_container_width=False):
             f"{strategy} lineup built!"
         )
 
+        # Preserve the most recently built single lineup across Streamlit reruns
+        # so it can be selected and saved as an official Final Lineup.
+        st.session_state["nfl_single_lineup"] = lineup.copy()
+        st.session_state["nfl_single_lineup_strategy"] = strategy
+
         lineup_display = lineup[
             [
                 "slot",
@@ -1094,6 +1104,13 @@ if st.button(
         else:
             st.success(f"3-lineup {portfolio_strategy} portfolio built!")
 
+        # Preserve the latest portfolio across Streamlit reruns so any of the
+        # three lineups can be saved as official Final Lineups.
+        st.session_state["nfl_portfolio"] = [
+            lineup.copy() for lineup in portfolio
+        ]
+        st.session_state["nfl_portfolio_strategy"] = portfolio_strategy
+
         portfolio_ids = []
 
         for lineup_number, portfolio_lineup in enumerate(portfolio, start=1):
@@ -1301,6 +1318,223 @@ if st.button(
                 ["Lineups", "Player"], ascending=[False, True]
             )
             st.dataframe(exposure_df, width="stretch", hide_index=True)
+
+st.divider()
+
+# -------------------------
+# Final Lineups
+# -------------------------
+
+st.subheader("🏁 NFL Final Lineups")
+st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
+st.caption(
+    "Save the exact lineup you actually plan to enter. "
+    "These records will become the source of truth for NFL Contest Review "
+    "and Performance Center."
+)
+
+final_meta_col1, final_meta_col2 = st.columns(2)
+
+with final_meta_col1:
+    nfl_final_slate_date = st.date_input(
+        "Final Lineup Slate Date",
+        key="nfl_final_slate_date",
+    )
+
+with final_meta_col2:
+    nfl_final_slate_name = st.text_input(
+        "Slate Name",
+        value="Main",
+        key="nfl_final_slate_name",
+    )
+
+available_final_sources = {}
+
+single_saved = st.session_state.get("nfl_single_lineup")
+if isinstance(single_saved, pd.DataFrame) and not single_saved.empty:
+    single_strategy = st.session_state.get(
+        "nfl_single_lineup_strategy",
+        single_saved.attrs.get("strategy", "Unknown"),
+    )
+    available_final_sources[
+        f"Single Build — {single_strategy}"
+    ] = (
+        single_saved,
+        single_strategy,
+    )
+
+portfolio_saved = st.session_state.get("nfl_portfolio", [])
+portfolio_strategy_saved = st.session_state.get(
+    "nfl_portfolio_strategy",
+    "Unknown",
+)
+
+if isinstance(portfolio_saved, list):
+    for index, saved_lineup in enumerate(portfolio_saved, start=1):
+        if isinstance(saved_lineup, pd.DataFrame) and not saved_lineup.empty:
+            available_final_sources[
+                f"Portfolio Lineup {index} — {portfolio_strategy_saved}"
+            ] = (
+                saved_lineup,
+                portfolio_strategy_saved,
+            )
+
+if not available_final_sources:
+    st.info(
+        "Build a single lineup or 3-lineup portfolio first. "
+        "The lineup(s) will then appear here for Final Lineup saving."
+    )
+else:
+    final_source_label = st.selectbox(
+        "Lineup to Save",
+        options=list(available_final_sources.keys()),
+        key="nfl_final_source",
+    )
+
+    final_lineup, final_strategy = available_final_sources[
+        final_source_label
+    ]
+
+    final_slot = st.selectbox(
+        "Final Lineup Slot",
+        options=[
+            "Lineup 1",
+            "Lineup 2",
+            "Lineup 3",
+            "Cash",
+            "GPP",
+        ],
+        key="nfl_final_slot",
+        help=(
+            "Each slot can hold one official lineup for the selected slate. "
+            "Saving the same slot again overwrites that slot only."
+        ),
+    )
+
+    final_preview_cols = [
+        "slot",
+        "player",
+        "position",
+        "team",
+        "opponent",
+        "salary",
+        "ll_projection",
+    ]
+
+    st.dataframe(
+        final_lineup[final_preview_cols],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    preview_col1, preview_col2, preview_col3 = st.columns(3)
+
+    preview_salary = float(
+        final_lineup.attrs.get(
+            "total_salary",
+            pd.to_numeric(
+                final_lineup["salary"],
+                errors="coerce",
+            ).fillna(0).sum(),
+        )
+    )
+
+    preview_projection = float(
+        final_lineup.attrs.get(
+            "total_projection",
+            pd.to_numeric(
+                final_lineup["ll_projection"],
+                errors="coerce",
+            ).fillna(0).sum(),
+        )
+    )
+
+    preview_col1.metric(
+        "Salary",
+        f"${preview_salary:,.0f}",
+    )
+    preview_col2.metric(
+        "Raw Projection",
+        f"{preview_projection:.1f}",
+    )
+    preview_col3.metric(
+        "Strategy",
+        final_strategy,
+    )
+
+    if st.button(
+        "💾 Save NFL Final Lineup",
+        type="primary",
+        key="save_nfl_final_lineup",
+    ):
+        try:
+            saved_record = save_nfl_final_lineup(
+                lineup=final_lineup,
+                slate_date=nfl_final_slate_date.isoformat(),
+                slate_name=nfl_final_slate_name,
+                lineup_slot=final_slot,
+                strategy=final_strategy,
+            )
+
+            st.session_state[
+                "nfl_final_lineup_notice"
+            ] = (
+                f"Saved {final_slot} — "
+                f"{saved_record.get('lineup_id', '')}"
+            )
+            st.rerun()
+
+        except Exception as exc:
+            st.error(
+                f"Could not save NFL Final Lineup: {exc}"
+            )
+
+final_notice = st.session_state.pop(
+    "nfl_final_lineup_notice",
+    None,
+)
+
+if final_notice:
+    st.success(f"🏁 {final_notice}")
+
+st.markdown("#### Saved NFL Final Lineups")
+
+try:
+    saved_nfl_finals = list_nfl_final_lineups(
+        slate_date=nfl_final_slate_date.isoformat(),
+        slate_name=nfl_final_slate_name,
+    )
+except Exception as exc:
+    saved_nfl_finals = []
+    st.caption(
+        f"Saved Final Lineups are not available yet: {exc}"
+    )
+
+if saved_nfl_finals:
+    saved_final_df = pd.DataFrame(saved_nfl_finals)
+
+    saved_display_cols = [
+        col for col in [
+            "lineup_slot",
+            "strategy",
+            "salary",
+            "projected_score",
+            "optimizer_score",
+            "lineup_id",
+            "updated_at",
+        ]
+        if col in saved_final_df.columns
+    ]
+
+    st.dataframe(
+        saved_final_df[saved_display_cols],
+        use_container_width=True,
+        hide_index=True,
+    )
+else:
+    st.caption(
+        "No NFL Final Lineups are saved for this slate yet."
+    )
 
 st.divider()
 
