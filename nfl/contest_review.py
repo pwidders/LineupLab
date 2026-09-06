@@ -1,5 +1,5 @@
 import re
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
@@ -148,6 +148,10 @@ def render_nfl_contest_review():
             entry_col = _find_col(
                 df,
                 ["EntryName", "Entry Name"],
+            )
+            entry_id_col = _find_col(
+                df,
+                ["EntryId", "Entry ID"],
             )
             rank_col = _find_col(
                 df,
@@ -402,8 +406,172 @@ def render_nfl_contest_review():
                     "No saved NFL Final Lineup matched this entry."
                 )
 
+            # -----------------------------
+            # Provisional Contest History Preview
+            # -----------------------------
+
+            entry_id = 0
+            if entry_id_col is not None:
+                entry_id = int(
+                    _safe_num(
+                        my_row.get(entry_id_col),
+                        0,
+                    )
+                )
+
+            matched_lineup_data = (
+                matched_final.get("lineup_data", [])
+                if matched_final
+                else []
+            )
+
+            player_results = []
+
+            if isinstance(matched_lineup_data, list):
+                for saved_player in matched_lineup_data:
+                    if not isinstance(saved_player, dict):
+                        continue
+
+                    player_results.append(
+                        {
+                            "player": saved_player.get(
+                                "player",
+                                "",
+                            ),
+                            "slot": saved_player.get(
+                                "slot",
+                                "",
+                            ),
+                            "position": saved_player.get(
+                                "position",
+                                "",
+                            ),
+                            "team": saved_player.get(
+                                "team",
+                                "",
+                            ),
+                            "opponent": saved_player.get(
+                                "opponent",
+                                "",
+                            ),
+                            "salary": saved_player.get(
+                                "salary",
+                                0,
+                            ),
+                            "projection": saved_player.get(
+                                "ll_projection",
+                                0,
+                            ),
+                            "cash_score": saved_player.get(
+                                "cash_score",
+                                0,
+                            ),
+                            "gpp_score": saved_player.get(
+                                "gpp_score",
+                                0,
+                            ),
+                            "fpts": 0,
+                            "ownership": 0,
+                        }
+                    )
+
+            rank_percentile = (
+                rank / field_size
+                if field_size > 0
+                else 0
+            )
+
+            history_preview = pd.DataFrame(
+                [
+                    {
+                        "Slate Date": slate_date.isoformat(),
+                        "Logged At": datetime.now().isoformat(),
+                        "Source File": file.name,
+                        "Entry ID": entry_id,
+                        "Entry Name": selected_entry,
+                        "Contest Type": contest_type,
+                        "Rank": rank,
+                        "Field Size": field_size,
+                        "Points": points,
+                        "Rank Percentile": rank_percentile,
+                        "Lineup ID": lineup_id,
+                        "Lineup": lineup_text,
+                        "Lineup Slot": (
+                            matched_final.get(
+                                "lineup_slot",
+                                "",
+                            )
+                            if matched_final
+                            else ""
+                        ),
+                        "Strategy": (
+                            matched_final.get(
+                                "strategy",
+                                "",
+                            )
+                            if matched_final
+                            else ""
+                        ),
+                        "Salary": (
+                            matched_final.get(
+                                "salary",
+                                0,
+                            )
+                            if matched_final
+                            else 0
+                        ),
+                        "Projected Score": (
+                            matched_final.get(
+                                "projected_score",
+                                0,
+                            )
+                            if matched_final
+                            else 0
+                        ),
+                        "Optimizer Score": (
+                            matched_final.get(
+                                "optimizer_score",
+                                0,
+                            )
+                            if matched_final
+                            else 0
+                        ),
+                        "Entry Fee": 0.0,
+                        "Winnings": 0.0,
+                        "Profit": 0.0,
+                        "Player Results": player_results,
+                    }
+                ]
+            )
+
+            st.markdown(
+                "#### Provisional Contest History Record"
+            )
+
+            st.dataframe(
+                history_preview.drop(
+                    columns=["Player Results"],
+                    errors="ignore",
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.button(
+                "💾 Save NFL Contest Result",
+                disabled=True,
+                key=(
+                    f"disabled_nfl_contest_save_"
+                    f"{file_index}_{file.name}"
+                ),
+                help=(
+                    "Saving will be enabled after we validate "
+                    "DraftKings' real 2026 NFL contest export."
+                ),
+            )
+
             st.caption(
-                "Contest History saving is intentionally not enabled "
-                "in v0.1. First we will validate this parser against "
-                "a real Week 1 DraftKings NFL export."
+                "Contest History saving is intentionally disabled in v0.1. "
+                "The preview above shows exactly what will be stored once the "
+                "Week 1 DraftKings export format is validated."
             )
