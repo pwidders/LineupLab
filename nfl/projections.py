@@ -624,9 +624,133 @@ def calculate_ll_projection(row):
         )
 
 
+def _opportunity_stability_score(row):
+    """
+    Return a 0-1 estimate of workload stability.
+
+    This is not a separate projection. It only helps shape the expected
+    floor/ceiling range around the median LineupLab projection.
+
+    Higher-volume players get a stronger floor. Lower-volume roles retain
+    more boom/bust behavior.
+    """
+
+    position = row.get("position")
+
+    def num(key):
+        value = pd.to_numeric(
+            pd.Series([row.get(key, np.nan)]),
+            errors="coerce",
+        ).iloc[0]
+
+        return 0.0 if pd.isna(value) else float(value)
+
+    if position == "QB":
+        score = num("recent_attempts") / 36.0
+
+    elif position == "RB":
+        weighted_opportunity = (
+            num("recent_carries")
+            + num("recent_targets") * 0.75
+        )
+        score = weighted_opportunity / 20.0
+
+    elif position == "WR":
+        score = num("recent_targets") / 10.0
+
+    elif position == "TE":
+        score = num("recent_targets") / 8.0
+
+    elif position == "DST":
+        # DST remains intrinsically volatile even with a strong matchup.
+        score = 0.45
+
+    else:
+        score = 0.50
+
+    return float(min(max(score, 0.0), 1.0))
+
+
+def _projection_range_multipliers(row):
+    """
+    Build position- and role-aware floor/ceiling multipliers.
+
+    The range is intentionally wider for volatile positions and uncertain
+    early-season roles, while established high-volume players receive a
+    stronger floor.
+
+    role_prior_weight comes from role_adjustments.py:
+      lower value = more trusted historical role
+      higher value = more uncertain/current-role prior influence
+    """
+
+    position = row.get("position")
+
+    base_floor = {
+        "QB": 0.74,
+        "RB": 0.66,
+        "WR": 0.58,
+        "TE": 0.56,
+        "DST": 0.42,
+    }.get(position, 0.65)
+
+    base_ceiling = {
+        "QB": 1.30,
+        "RB": 1.47,
+        "WR": 1.58,
+        "TE": 1.55,
+        "DST": 1.78,
+    }.get(position, 1.45)
+
+    stability = _opportunity_stability_score(row)
+
+    prior_weight = pd.to_numeric(
+        pd.Series([row.get("role_prior_weight", 0.15)]),
+        errors="coerce",
+    ).iloc[0]
+
+    if pd.isna(prior_weight):
+        prior_weight = 0.15
+
+    prior_weight = float(
+        min(max(prior_weight, 0.0), 1.0)
+    )
+
+    # Higher workload stability lifts the floor.
+    floor_multiplier = (
+        base_floor
+        + stability * 0.10
+        - prior_weight * 0.10
+    )
+
+    # Role uncertainty and lower-volume roles create more upside spread.
+    ceiling_multiplier = (
+        base_ceiling
+        + (1.0 - stability) * 0.08
+        + prior_weight * 0.12
+    )
+
+    floor_multiplier = min(
+        max(floor_multiplier, 0.35),
+        0.88,
+    )
+
+    ceiling_multiplier = min(
+        max(ceiling_multiplier, 1.18),
+        1.95,
+    )
+
+    return floor_multiplier, ceiling_multiplier
+
+
 def add_ll_projections(players):
     """
     Add LineupLab projection outputs.
+
+    Floor and ceiling are player-specific rather than fixed percentages:
+      - position sets the base volatility profile;
+      - recent workload affects stability;
+      - early-season role uncertainty widens the range.
     """
 
     players = players.copy()
@@ -636,13 +760,44 @@ def add_ll_projections(players):
         axis=1,
     )
 
-    players["ll_floor"] = players["ll_projection"] * 0.70
-    players["ll_ceiling"] = players["ll_projection"] * 1.40
+    range_multipliers = players.apply(
+        _projection_range_multipliers,
+        axis=1,
+        result_type="expand",
+    )
+
+    range_multipliers.columns = [
+        "_floor_multiplier",
+        "_ceiling_multiplier",
+    ]
+
+    players = pd.concat(
+        [players, range_multipliers],
+        axis=1,
+    )
+
+    players["ll_floor"] = (
+        players["ll_projection"]
+        * players["_floor_multiplier"]
+    )
+
+    players["ll_ceiling"] = (
+        players["ll_projection"]
+        * players["_ceiling_multiplier"]
+    )
 
     players["ll_value"] = (
         players["ll_projection"]
         / players["salary"]
         * 1000
+    )
+
+    players = players.drop(
+        columns=[
+            "_floor_multiplier",
+            "_ceiling_multiplier",
+        ],
+        errors="ignore",
     )
 
     return players
