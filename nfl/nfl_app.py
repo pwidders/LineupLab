@@ -56,6 +56,7 @@ from nfl.game_environment import (
 )
 
 from nfl.optimizer import optimize_lineup, optimize_portfolio
+from nfl.contest_review import render_nfl_contest_review
 
 from nfl.final_lineup_store import (
     save_nfl_final_lineup,
@@ -1535,6 +1536,10 @@ else:
     st.caption(
         "No NFL Final Lineups are saved for this slate yet."
     )
+
+st.divider()
+
+render_nfl_contest_review()
 
 st.divider()
 

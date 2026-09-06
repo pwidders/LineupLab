@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -10,47 +11,41 @@ from nfl.salary_store import get_supabase_client
 TABLE_NAME = "nfl_final_lineups"
 
 
-def nfl_lineup_id_from_dataframe(lineup: pd.DataFrame) -> str:
-    """
-    Create a stable fingerprint for one NFL lineup.
+def _normalize_player_name(value: str) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    return text
 
-    DraftKings player IDs are preferred because they are unambiguous.
-    Player names are used only as a fallback.
-    """
 
-    if lineup is None or lineup.empty:
-        raise ValueError("Cannot create a lineup ID from an empty lineup.")
+def nfl_lineup_id_from_names(player_names) -> str:
+    names = [
+        _normalize_player_name(name)
+        for name in player_names
+        if _normalize_player_name(name)
+    ]
 
-    if "dk_id" in lineup.columns:
-        values = (
-            lineup["dk_id"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-        )
-        values = values[values != ""].tolist()
-    else:
-        values = []
+    if not names:
+        raise ValueError("Cannot create an NFL lineup ID without player names.")
 
-    if not values and "player" in lineup.columns:
-        values = (
-            lineup["player"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .tolist()
-        )
+    fingerprint_text = "|".join(sorted(names))
 
-    if not values:
-        raise ValueError(
-            "NFL lineup needs dk_id or player values to create a lineup ID."
-        )
-
-    fingerprint_text = "|".join(sorted(values))
     return hashlib.sha256(
         fingerprint_text.encode("utf-8")
     ).hexdigest()[:24]
+
+
+def nfl_lineup_id_from_dataframe(lineup: pd.DataFrame) -> str:
+    if lineup is None or lineup.empty:
+        raise ValueError("Cannot create a lineup ID from an empty lineup.")
+
+    if "player" not in lineup.columns:
+        raise ValueError(
+            "NFL lineup needs a player column to create a lineup ID."
+        )
+
+    return nfl_lineup_id_from_names(
+        lineup["player"].dropna().astype(str).tolist()
+    )
 
 
 def _lineup_to_json(lineup: pd.DataFrame) -> list[dict]:
@@ -72,10 +67,6 @@ def save_nfl_final_lineup(
     lineup_slot: str,
     strategy: str,
 ) -> dict:
-    """
-    Create or overwrite one official NFL Final Lineup slot.
-    """
-
     slate_name = str(slate_name).strip() or "Main"
     lineup_slot = str(lineup_slot).strip() or "Lineup 1"
     strategy = str(strategy).strip() or "Unknown"
@@ -101,10 +92,7 @@ def save_nfl_final_lineup(
     )
 
     optimizer_score = float(
-        lineup.attrs.get(
-            "optimizer_score",
-            0,
-        )
+        lineup.attrs.get("optimizer_score", 0)
     )
 
     payload = {
@@ -143,10 +131,6 @@ def list_nfl_final_lineups(
     slate_date: str,
     slate_name: str,
 ) -> list[dict]:
-    """
-    Return every saved NFL Final Lineup for one slate.
-    """
-
     supabase = get_supabase_client()
 
     response = (
@@ -170,10 +154,6 @@ def load_nfl_final_lineup(
     slate_name: str,
     lineup_slot: str,
 ) -> tuple[pd.DataFrame, dict]:
-    """
-    Load one saved NFL Final Lineup.
-    """
-
     supabase = get_supabase_client()
 
     response = (
@@ -200,12 +180,6 @@ def find_nfl_final_lineup_by_id(
     lineup_id: str,
     slate_date: str | None = None,
 ) -> dict | None:
-    """
-    Find an NFL Final Lineup by fingerprint.
-
-    This will be used later by NFL Contest Review.
-    """
-
     lineup_id = str(lineup_id).strip()
 
     if not lineup_id:
@@ -233,3 +207,4 @@ def find_nfl_final_lineup_by_id(
         return None
 
     return response.data[0]
+
