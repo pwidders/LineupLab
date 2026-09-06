@@ -74,14 +74,56 @@ def _blend(old, prior, prior_weight):
     return old * (1.0 - prior_weight) + prior * prior_weight
 
 
-def _has_history(row, position):
+def _history_strength(row, position):
+    """
+    Classify how trustworthy the late-2025 workload is for Week 1.
+
+    "none"   = no usable recent NFL workload
+    "thin"   = some history exists, but not enough to assume the old role
+               should carry forward unchanged
+    "stable" = meaningful recent workload exists
+
+    The thresholds are intentionally modest. This is a role-confidence layer,
+    not a player-quality model.
+    """
     if position == "QB":
-        return not pd.isna(_num(row, "recent_attempts")) and _num(row, "recent_attempts") > 0
+        attempts = _num(row, "recent_attempts")
+
+        if pd.isna(attempts) or attempts <= 0:
+            return "none"
+
+        if attempts < 15:
+            return "thin"
+
+        return "stable"
+
     if position == "RB":
-        return not pd.isna(_num(row, "recent_carries"))
+        carries = _num(row, "recent_carries")
+        targets = _num(row, "recent_targets")
+
+        carries = 0 if pd.isna(carries) else carries
+        targets = 0 if pd.isna(targets) else targets
+
+        if carries <= 0 and targets <= 0:
+            return "none"
+
+        if carries < 6 and targets < 2:
+            return "thin"
+
+        return "stable"
+
     if position in ("WR", "TE"):
-        return not pd.isna(_num(row, "recent_targets"))
-    return True
+        targets = _num(row, "recent_targets")
+
+        if pd.isna(targets) or targets <= 0:
+            return "none"
+
+        if targets < 3:
+            return "thin"
+
+        return "stable"
+
+    return "stable"
 
 
 def apply_role_adjustments(players):
@@ -94,8 +136,9 @@ def apply_role_adjustments(players):
       3. Flag every adjustment so it can be audited later in Performance Center.
 
     The layer is deliberately conservative:
-      - stable-history players keep 90% of their historical opportunity;
-      - players who changed teams keep 75% of history;
+      - stable-history players keep 85% of historical opportunity;
+      - players with only thin recent usage lean 50% on the current role prior;
+      - players who changed teams keep 65% of historical opportunity;
       - no-history players use salary-tier workload priors.
 
     It does NOT pretend to know a live depth chart. Manual/live depth-chart
@@ -112,7 +155,7 @@ def apply_role_adjustments(players):
     )
     players["role_source"] = "2025 recent baseline"
     players["role_adjustment"] = "stable"
-    players["role_prior_weight"] = 0.10
+    players["role_prior_weight"] = 0.15
     players["optimizer_eligible"] = True
     players["qb_starter_verified"] = True
 
@@ -123,7 +166,7 @@ def apply_role_adjustments(players):
 
         tier = row["role_tier"]
         priors = ROLE_PRIORS[pos][tier]
-        has_history = _has_history(row, pos)
+        history_strength = _history_strength(row, pos)
 
         current_team = str(row.get("team", "") or "").upper()
         historical_team = str(row.get("historical_team", "") or "").upper()
@@ -133,7 +176,7 @@ def apply_role_adjustments(players):
             and historical_team != current_team
         )
 
-        if not has_history:
+        if history_strength == "none":
 
             if pos == "QB":
                 player_name = row.get("player")
@@ -162,12 +205,19 @@ def apply_role_adjustments(players):
             prior_weight = 1.0
             source = "2026 salary-tier fallback (true no-history / unmatched)"
             adjustment = "no 2025 usable history"
+
         elif changed_team:
-            prior_weight = 0.25
-            source = "2025 baseline + 2026 team-change prior"
+            prior_weight = 0.35
+            source = "2025 baseline + stronger 2026 team-change prior"
             adjustment = f"team change {historical_team}->{current_team}"
+
+        elif history_strength == "thin":
+            prior_weight = 0.50
+            source = "thin 2025 workload + 2026 salary-tier role prior"
+            adjustment = "thin recent workload / role uncertainty"
+
         else:
-            prior_weight = 0.10
+            prior_weight = 0.15
             source = "2025 baseline + light 2026 role prior"
             adjustment = "early-season role regression"
 
