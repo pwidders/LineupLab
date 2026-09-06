@@ -845,12 +845,55 @@ def add_strategy_projections(players):
 
     return players
 
+def expected_dst_points_allowed_score(opponent_implied_total):
+    """
+    Convert the opponent's Vegas implied total into the DraftKings
+    DST points-allowed scoring component.
+
+    DraftKings NFL DST points allowed:
+      0 points      -> +10
+      1-6 points    -> +7
+      7-13 points   -> +4
+      14-20 points  -> +1
+      21-27 points  ->  0
+      28-34 points  -> -1
+      35+ points    -> -4
+
+    For v0.2 we use the opponent implied total as the expected scoring
+    outcome and assign the corresponding DK scoring bucket.
+    """
+
+    try:
+        points = float(opponent_implied_total)
+    except (TypeError, ValueError):
+        return 0.0
+
+    if pd.isna(points):
+        return 0.0
+
+    if points <= 0:
+        return 10.0
+    if points <= 6:
+        return 7.0
+    if points <= 13:
+        return 4.0
+    if points <= 20:
+        return 1.0
+    if points <= 27:
+        return 0.0
+    if points <= 34:
+        return -1.0
+
+    return -4.0
+
+
 def project_dst(row):
     """
-    LineupLab DST Projection v0.1.
+    LineupLab DST Projection v0.2.
 
-    Historical defensive production only.
-    Vegas / points-allowed adjustment comes next.
+    Combines recent defensive production with the DraftKings
+    points-allowed scoring component estimated from the opponent's
+    Vegas implied total.
     """
 
     sacks = row.get("recent_def_sacks", 0)
@@ -889,6 +932,10 @@ def project_dst(row):
         safeties,
     ) = values
 
+    points_allowed_score = expected_dst_points_allowed_score(
+        row.get("opponent_implied_total", np.nan)
+    )
+
     dk_points = (
         sacks * 1
         + interceptions * 2
@@ -896,42 +943,30 @@ def project_dst(row):
         + defensive_tds * 6
         + special_teams_tds * 6
         + safeties * 2
+        + points_allowed_score
     )
 
     return dk_points
 
 def adjust_dst_for_game_environment(row, base_projection):
     """
-    Adjust DST projection for Vegas/game environment.
+    Apply a modest DST game-script adjustment after the DraftKings
+    points-allowed component has already been incorporated.
 
-    DST benefits from:
-      - low opponent implied total
-      - being favored
-      - larger favorite spreads
+    Opponent implied total is intentionally NOT used again here;
+    doing so would double-count the same Vegas information.
+
+    DST still benefits from being favored because favorable game scripts
+    can create more obvious passing situations and turnover/sack chances.
     """
 
     if pd.isna(base_projection):
         return np.nan
 
-    opponent_total = row.get("opponent_implied_total", np.nan)
     spread = row.get("spread", np.nan)
 
     adjustment = 1.0
 
-    # Opponent scoring expectation
-    if not pd.isna(opponent_total):
-        if opponent_total <= 17:
-            adjustment += 0.10
-        elif opponent_total <= 20:
-            adjustment += 0.06
-        elif opponent_total <= 23:
-            adjustment += 0.02
-        elif opponent_total >= 28:
-            adjustment -= 0.08
-        elif opponent_total >= 25:
-            adjustment -= 0.04
-
-    # Favorite / underdog game script
     if not pd.isna(spread):
         if spread <= -7:
             adjustment += 0.08
@@ -942,7 +977,6 @@ def adjust_dst_for_game_environment(row, base_projection):
         elif spread >= 3:
             adjustment -= 0.04
 
-    # Keep Vegas influential but not dominant
-    adjustment = min(max(adjustment, 0.80), 1.20)
+    adjustment = min(max(adjustment, 0.90), 1.10)
 
     return base_projection * adjustment
