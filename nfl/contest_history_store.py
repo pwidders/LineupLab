@@ -3,17 +3,19 @@ from typing import Tuple
 
 import pandas as pd
 import streamlit as st
-from supabase import create_client
+
+from nfl.auth import (
+    get_authenticated_client,
+    get_current_user_id,
+)
 
 
 TABLE_NAME = "nfl_contest_history"
 
 
 def _get_client():
-    return create_client(
-        st.secrets["SUPABASE_URL"],
-        st.secrets["SUPABASE_SERVICE_KEY"],
-    )
+    """Return the signed-in user client so RLS is enforced."""
+    return get_authenticated_client()
 
 
 def _clean_value(value):
@@ -54,10 +56,13 @@ def _row_to_record(row: pd.Series) -> dict:
         "Player Results": "player_results",
     }
 
-    return {
+    record = {
         target_col: _clean_value(row.get(source_col))
         for source_col, target_col in mapping.items()
     }
+
+    record["user_id"] = get_current_user_id()
+    return record
 
 
 def save_nfl_contest_history(
@@ -74,6 +79,7 @@ def save_nfl_contest_history(
         return 0, 0
 
     client = _get_client()
+    user_id = get_current_user_id()
     inserted = 0
     updated = 0
 
@@ -86,6 +92,7 @@ def save_nfl_contest_history(
             duplicate_query = (
                 client.table(TABLE_NAME)
                 .select("id")
+                .eq("user_id", user_id)
                 .eq("entry_id", entry_id)
                 .limit(1)
                 .execute()
@@ -94,6 +101,7 @@ def save_nfl_contest_history(
             duplicate_query = (
                 client.table(TABLE_NAME)
                 .select("id")
+                .eq("user_id", user_id)
                 .eq("slate_date", record["slate_date"])
                 .eq("source_file", record["source_file"])
                 .eq("entry_name", record["entry_name"])
@@ -131,10 +139,12 @@ def load_nfl_contest_history() -> pd.DataFrame:
     Load all saved NFL contest-history records.
     """
     client = _get_client()
+    user_id = get_current_user_id()
 
     response = (
         client.table(TABLE_NAME)
         .select("*")
+        .eq("user_id", user_id)
         .order("slate_date", desc=True)
         .order("created_at", desc=True)
         .execute()
