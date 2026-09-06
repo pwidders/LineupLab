@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from nfl.salary_store import get_supabase_client
+from nfl.auth import (
+    get_authenticated_client,
+    get_current_user_id,
+)
 
 
 TABLE_NAME = "nfl_final_lineups"
@@ -25,7 +28,9 @@ def nfl_lineup_id_from_names(player_names) -> str:
     ]
 
     if not names:
-        raise ValueError("Cannot create an NFL lineup ID without player names.")
+        raise ValueError(
+            "Cannot create an NFL lineup ID without player names."
+        )
 
     fingerprint_text = "|".join(sorted(names))
 
@@ -34,23 +39,35 @@ def nfl_lineup_id_from_names(player_names) -> str:
     ).hexdigest()[:24]
 
 
-def nfl_lineup_id_from_dataframe(lineup: pd.DataFrame) -> str:
+def nfl_lineup_id_from_dataframe(
+    lineup: pd.DataFrame,
+) -> str:
     if lineup is None or lineup.empty:
-        raise ValueError("Cannot create a lineup ID from an empty lineup.")
+        raise ValueError(
+            "Cannot create a lineup ID from an empty lineup."
+        )
 
     if "player" not in lineup.columns:
         raise ValueError(
-            "NFL lineup needs a player column to create a lineup ID."
+            "NFL lineup needs a player column "
+            "to create a lineup ID."
         )
 
     return nfl_lineup_id_from_names(
-        lineup["player"].dropna().astype(str).tolist()
+        lineup["player"]
+        .dropna()
+        .astype(str)
+        .tolist()
     )
 
 
-def _lineup_to_json(lineup: pd.DataFrame) -> list[dict]:
+def _lineup_to_json(
+    lineup: pd.DataFrame,
+) -> list[dict]:
     if lineup is None or lineup.empty:
-        raise ValueError("Cannot save an empty NFL lineup.")
+        raise ValueError(
+            "Cannot save an empty NFL lineup."
+        )
 
     return json.loads(
         lineup.to_json(
@@ -67,6 +84,9 @@ def save_nfl_final_lineup(
     lineup_slot: str,
     strategy: str,
 ) -> dict:
+    user_id = get_current_user_id()
+    supabase = get_authenticated_client()
+
     slate_name = str(slate_name).strip() or "Main"
     lineup_slot = str(lineup_slot).strip() or "Lineup 1"
     strategy = str(strategy).strip() or "Unknown"
@@ -75,7 +95,10 @@ def save_nfl_final_lineup(
         lineup.attrs.get(
             "total_salary",
             pd.to_numeric(
-                lineup.get("salary", pd.Series(dtype=float)),
+                lineup.get(
+                    "salary",
+                    pd.Series(dtype=float),
+                ),
                 errors="coerce",
             ).fillna(0).sum(),
         )
@@ -85,7 +108,10 @@ def save_nfl_final_lineup(
         lineup.attrs.get(
             "total_projection",
             pd.to_numeric(
-                lineup.get("ll_projection", pd.Series(dtype=float)),
+                lineup.get(
+                    "ll_projection",
+                    pd.Series(dtype=float),
+                ),
                 errors="coerce",
             ).fillna(0).sum(),
         )
@@ -96,6 +122,7 @@ def save_nfl_final_lineup(
     )
 
     payload = {
+        "user_id": user_id,
         "slate_date": str(slate_date),
         "slate_name": slate_name,
         "lineup_slot": lineup_slot,
@@ -108,20 +135,22 @@ def save_nfl_final_lineup(
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    supabase = get_supabase_client()
-
     response = (
         supabase.table(TABLE_NAME)
         .upsert(
             payload,
-            on_conflict="slate_date,slate_name,lineup_slot",
+            on_conflict=(
+                "user_id,slate_date,"
+                "slate_name,lineup_slot"
+            ),
         )
         .execute()
     )
 
     if not response.data:
         raise RuntimeError(
-            "Supabase did not return the saved NFL Final Lineup."
+            "Supabase did not return the "
+            "saved NFL Final Lineup."
         )
 
     return response.data[0]
@@ -131,17 +160,23 @@ def list_nfl_final_lineups(
     slate_date: str,
     slate_name: str,
 ) -> list[dict]:
-    supabase = get_supabase_client()
+    user_id = get_current_user_id()
+    supabase = get_authenticated_client()
 
     response = (
         supabase.table(TABLE_NAME)
         .select(
-            "id, slate_date, slate_name, lineup_slot, strategy, "
-            "lineup_id, salary, projected_score, optimizer_score, "
+            "id, user_id, slate_date, slate_name, "
+            "lineup_slot, strategy, lineup_id, salary, "
+            "projected_score, optimizer_score, "
             "created_at, updated_at"
         )
+        .eq("user_id", user_id)
         .eq("slate_date", str(slate_date))
-        .eq("slate_name", str(slate_name).strip() or "Main")
+        .eq(
+            "slate_name",
+            str(slate_name).strip() or "Main",
+        )
         .order("lineup_slot")
         .execute()
     )
@@ -154,14 +189,22 @@ def load_nfl_final_lineup(
     slate_name: str,
     lineup_slot: str,
 ) -> tuple[pd.DataFrame, dict]:
-    supabase = get_supabase_client()
+    user_id = get_current_user_id()
+    supabase = get_authenticated_client()
 
     response = (
         supabase.table(TABLE_NAME)
         .select("*")
+        .eq("user_id", user_id)
         .eq("slate_date", str(slate_date))
-        .eq("slate_name", str(slate_name).strip() or "Main")
-        .eq("lineup_slot", str(lineup_slot).strip())
+        .eq(
+            "slate_name",
+            str(slate_name).strip() or "Main",
+        )
+        .eq(
+            "lineup_slot",
+            str(lineup_slot).strip(),
+        )
         .limit(1)
         .execute()
     )
@@ -169,32 +212,42 @@ def load_nfl_final_lineup(
     if not response.data:
         raise FileNotFoundError(
             f"No NFL Final Lineup found for "
-            f"{slate_date} {slate_name} {lineup_slot}."
+            f"{slate_date} {slate_name} "
+            f"{lineup_slot}."
         )
 
     record = response.data[0]
-    return pd.DataFrame(record.get("lineup_data", [])), record
+
+    return (
+        pd.DataFrame(record.get("lineup_data", [])),
+        record,
+    )
 
 
 def find_nfl_final_lineup_by_id(
     lineup_id: str,
     slate_date: str | None = None,
 ) -> dict | None:
+    user_id = get_current_user_id()
+    supabase = get_authenticated_client()
+
     lineup_id = str(lineup_id).strip()
 
     if not lineup_id:
         return None
 
-    supabase = get_supabase_client()
-
     query = (
         supabase.table(TABLE_NAME)
         .select("*")
+        .eq("user_id", user_id)
         .eq("lineup_id", lineup_id)
     )
 
     if slate_date:
-        query = query.eq("slate_date", str(slate_date))
+        query = query.eq(
+            "slate_date",
+            str(slate_date),
+        )
 
     response = (
         query
@@ -207,4 +260,5 @@ def find_nfl_final_lineup_by_id(
         return None
 
     return response.data[0]
+
 
