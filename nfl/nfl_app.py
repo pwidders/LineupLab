@@ -901,58 +901,146 @@ with tab_build:
 
         else:
 
-            st.success(
+            st.session_state["nfl_single_lineup"] = lineup.copy()
+            st.session_state["nfl_single_lineup_strategy"] = strategy
+            st.session_state["nfl_single_lineup_notice"] = (
                 f"{strategy} lineup built!"
             )
 
-            # Preserve the most recently built single lineup across Streamlit reruns
-            # so it can be selected and saved as an official Final Lineup.
-            st.session_state["nfl_single_lineup"] = lineup.copy()
-            st.session_state["nfl_single_lineup_strategy"] = strategy
+    # Render the most recently built single lineup from session state.
+    # This keeps the exact lineup visible when date/slot fields trigger reruns.
+    single_lineup = st.session_state.get("nfl_single_lineup")
+    single_strategy = st.session_state.get(
+        "nfl_single_lineup_strategy",
+        strategy,
+    )
 
-            lineup_display = lineup[
-                [
-                    "slot",
-                    "player",
-                    "position",
-                    "team",
-                    "opponent",
-                    "salary",
-                    "ll_projection",
-                    "cash_projection",
-                    "gpp_projection",
-                    "cash_score",
-                    "gpp_score",
-                ]
-            ].copy()
+    single_notice = st.session_state.pop(
+        "nfl_single_lineup_notice",
+        None,
+    )
+    if single_notice:
+        st.success(single_notice)
 
-            st.dataframe(
-                lineup_display,
-                width="stretch",
-                hide_index=True,
+    if isinstance(single_lineup, pd.DataFrame) and not single_lineup.empty:
+
+        lineup_display = single_lineup[
+            [
+                "slot",
+                "player",
+                "position",
+                "team",
+                "opponent",
+                "salary",
+                "ll_projection",
+                "cash_projection",
+                "gpp_projection",
+                "cash_score",
+                "gpp_score",
+            ]
+        ].copy()
+
+        st.dataframe(
+            lineup_display,
+            width="stretch",
+            hide_index=True,
+        )
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        total_salary = float(
+            single_lineup.attrs.get(
+                "total_salary",
+                pd.to_numeric(
+                    single_lineup["salary"],
+                    errors="coerce",
+                ).fillna(0).sum(),
+            )
+        )
+
+        total_projection = float(
+            single_lineup.attrs.get(
+                "total_projection",
+                pd.to_numeric(
+                    single_lineup["ll_projection"],
+                    errors="coerce",
+                ).fillna(0).sum(),
+            )
+        )
+
+        optimizer_score = float(
+            single_lineup.attrs.get(
+                "optimizer_score",
+                0,
+            )
+        )
+
+        col1.metric(
+            "Salary",
+            f"${total_salary:,.0f}",
+        )
+
+        col2.metric(
+            "Projected Points",
+            f"{total_projection:.1f}",
+        )
+
+        col3.metric(
+            "Salary Remaining",
+            f"${50000 - total_salary:,.0f}",
+        )
+
+        col4.metric(
+            "Strategy Projection",
+            f"{optimizer_score:.1f}",
+        )
+
+        st.markdown("#### Save This Lineup as Final")
+        save_col1, save_col2, save_col3 = st.columns(3)
+
+        with save_col1:
+            build_final_date = st.date_input(
+                "Slate Date",
+                key="build_final_date",
             )
 
-            col1, col2, col3, col4 = st.columns(4)
-
-            col1.metric(
-                "Salary",
-                f"${lineup.attrs['total_salary']:,.0f}",
+        with save_col2:
+            build_final_slate = st.text_input(
+                "Slate Name",
+                value="Main",
+                key="build_final_slate",
             )
 
-            col2.metric(
-                "Projected Points",
-                f"{lineup.attrs['total_projection']:.1f}",
+        with save_col3:
+            build_final_slot = st.selectbox(
+                "Final Lineup Slot",
+                ["Lineup 1", "Lineup 2", "Lineup 3", "Cash", "GPP"],
+                key="build_final_slot",
             )
 
-            col3.metric(
-                "Salary Remaining",
-                f"${50000 - lineup.attrs['total_salary']:,.0f}",
-            )
+        if st.button(
+            "💾 Save This Lineup as Final",
+            type="primary",
+            key="save_build_final_lineup",
+        ):
+            try:
+                saved_record = save_nfl_final_lineup(
+                    lineup=single_lineup,
+                    slate_date=build_final_date.isoformat(),
+                    slate_name=build_final_slate,
+                    lineup_slot=build_final_slot,
+                    strategy=single_strategy,
+                )
 
-            col4.metric(
-                "Strategy Projection",
-                f"{lineup.attrs['optimizer_score']:.1f}",
-            )
+                st.success(
+                    f"🏁 Saved {build_final_slot} — "
+                    f"{saved_record.get('lineup_id', '')}"
+                )
+
+            except Exception as exc:
+                st.error(
+                    f"Could not save NFL Final Lineup: {exc}"
+                )
 
 
     # -------------------------
@@ -1204,228 +1292,346 @@ with tab_build:
             )
 
         else:
-            if len(portfolio) < 3:
-                st.warning(
-                    f"Only {len(portfolio)} valid lineup(s) could be built "
-                    "with the current constraints."
-                )
-            else:
-                st.success(f"3-lineup {portfolio_strategy} portfolio built!")
-
-            # Preserve the latest portfolio across Streamlit reruns so any of the
-            # three lineups can be saved as official Final Lineups.
             st.session_state["nfl_portfolio"] = [
                 lineup.copy() for lineup in portfolio
             ]
             st.session_state["nfl_portfolio_strategy"] = portfolio_strategy
+            st.session_state["nfl_portfolio_notice"] = (
+                f"{len(portfolio)}-lineup {portfolio_strategy} portfolio built!"
+            )
 
-            portfolio_ids = []
+    # Render the latest portfolio from session state so save controls
+    # survive reruns caused by date/slot changes.
+    saved_portfolio = st.session_state.get("nfl_portfolio", [])
+    saved_portfolio_strategy = st.session_state.get(
+        "nfl_portfolio_strategy",
+        portfolio_strategy,
+    )
 
-            for lineup_number, portfolio_lineup in enumerate(portfolio, start=1):
+    portfolio_notice = st.session_state.pop(
+        "nfl_portfolio_notice",
+        None,
+    )
+    if portfolio_notice:
+        st.success(portfolio_notice)
 
-                st.markdown(f"### Lineup {lineup_number}")
+    if isinstance(saved_portfolio, list) and saved_portfolio:
 
-                portfolio_display = portfolio_lineup[
-                    [
-                        "slot",
-                        "player",
-                        "position",
-                        "team",
-                        "opponent",
-                        "salary",
-                        "ll_projection",
-                        "gpp_projection",
-                        "gpp_score",
-                    ]
-                ].copy()
+        portfolio_ids = []
 
-                st.dataframe(
-                    portfolio_display,
-                    width="stretch",
-                    hide_index=True,
-                )
+        for lineup_number, portfolio_lineup in enumerate(
+            saved_portfolio,
+            start=1,
+        ):
 
-                metric1, metric2, metric3, metric4 = st.columns(4)
+            if not isinstance(portfolio_lineup, pd.DataFrame):
+                continue
 
-                metric1.metric(
-                    "Salary",
-                    f"${portfolio_lineup.attrs['total_salary']:,.0f}",
-                )
+            st.markdown(f"### Lineup {lineup_number}")
 
-                metric2.metric(
-                    "Projected Points",
-                    f"{portfolio_lineup.attrs['total_projection']:.1f}",
-                )
-
-                metric3.metric(
-                    "Salary Remaining",
-                    f"${50000 - portfolio_lineup.attrs['total_salary']:,.0f}",
-                )
-
-                metric4.metric(
-                    f"{portfolio_strategy} Strategy Projection",
-                    f"{portfolio_lineup.attrs['optimizer_score']:.1f}",
-                )
-
-                portfolio_ids.append(
-                    set(
-                        portfolio_lineup["dk_id"]
-                        .dropna()
-                        .astype(str)
-                    )
-                )
-
-            if len(portfolio_ids) > 1:
-                st.markdown("### Portfolio Overlap")
-
-                overlap_rows = []
-
-                for i in range(len(portfolio_ids)):
-                    for j in range(i + 1, len(portfolio_ids)):
-                        overlap_rows.append(
-                            {
-                                "Lineups": f"{i + 1} vs {j + 1}",
-                                "Shared Players": len(
-                                    portfolio_ids[i] & portfolio_ids[j]
-                                ),
-                            }
-                        )
-
-                import pandas as pd
-
-                st.dataframe(
-                    pd.DataFrame(overlap_rows),
-                    width="stretch",
-                    hide_index=True,
-                )
-
-            if portfolio:
-                st.markdown("### QB Exposure")
-
-                qb_exposure = {}
-
-                for portfolio_lineup in portfolio:
-                    qb_rows = portfolio_lineup[
-                        portfolio_lineup["position"] == "QB"
-                    ]
-
-                    if qb_rows.empty:
-                        continue
-
-                    qb_name = qb_rows.iloc[0]["player"]
-                    qb_exposure[qb_name] = qb_exposure.get(qb_name, 0) + 1
-
-                qb_exposure_rows = [
-                    {
-                        "QB": qb_name,
-                        "Lineups": count,
-                        "Exposure": f"{count / len(portfolio):.0%}",
-                    }
-                    for qb_name, count in sorted(
-                        qb_exposure.items(),
-                        key=lambda item: (-item[1], item[0]),
-                    )
+            portfolio_display = portfolio_lineup[
+                [
+                    "slot",
+                    "player",
+                    "position",
+                    "team",
+                    "opponent",
+                    "salary",
+                    "ll_projection",
+                    "gpp_projection",
+                    "gpp_score",
                 ]
+            ].copy()
 
-                if qb_exposure_rows:
-                    st.dataframe(
-                        pd.DataFrame(qb_exposure_rows),
-                        width="stretch",
-                        hide_index=True,
+            st.dataframe(
+                portfolio_display,
+                width="stretch",
+                hide_index=True,
+            )
+
+            metric1, metric2, metric3, metric4 = st.columns(4)
+
+            p_salary = float(
+                portfolio_lineup.attrs.get(
+                    "total_salary",
+                    pd.to_numeric(
+                        portfolio_lineup["salary"],
+                        errors="coerce",
+                    ).fillna(0).sum(),
+                )
+            )
+
+            p_projection = float(
+                portfolio_lineup.attrs.get(
+                    "total_projection",
+                    pd.to_numeric(
+                        portfolio_lineup["ll_projection"],
+                        errors="coerce",
+                    ).fillna(0).sum(),
+                )
+            )
+
+            p_optimizer = float(
+                portfolio_lineup.attrs.get(
+                    "optimizer_score",
+                    0,
+                )
+            )
+
+            metric1.metric(
+                "Salary",
+                f"${p_salary:,.0f}",
+            )
+            metric2.metric(
+                "Projected Points",
+                f"{p_projection:.1f}",
+            )
+            metric3.metric(
+                "Salary Remaining",
+                f"${50000 - p_salary:,.0f}",
+            )
+            metric4.metric(
+                f"{saved_portfolio_strategy} Strategy Projection",
+                f"{p_optimizer:.1f}",
+            )
+
+            save_p1, save_p2, save_p3 = st.columns(3)
+
+            with save_p1:
+                portfolio_final_date = st.date_input(
+                    "Slate Date",
+                    key=f"portfolio_final_date_{lineup_number}",
+                )
+
+            with save_p2:
+                portfolio_final_slate = st.text_input(
+                    "Slate Name",
+                    value="Main",
+                    key=f"portfolio_final_slate_{lineup_number}",
+                )
+
+            with save_p3:
+                portfolio_final_slot = st.selectbox(
+                    "Final Lineup Slot",
+                    ["Lineup 1", "Lineup 2", "Lineup 3", "Cash", "GPP"],
+                    index=min(lineup_number - 1, 2),
+                    key=f"portfolio_final_slot_{lineup_number}",
+                )
+
+            if st.button(
+                f"💾 Save Lineup {lineup_number} as Final",
+                key=f"save_portfolio_final_{lineup_number}",
+            ):
+                try:
+                    saved_record = save_nfl_final_lineup(
+                        lineup=portfolio_lineup,
+                        slate_date=portfolio_final_date.isoformat(),
+                        slate_name=portfolio_final_slate,
+                        lineup_slot=portfolio_final_slot,
+                        strategy=saved_portfolio_strategy,
                     )
 
-            if portfolio:
-                st.markdown("### QB Stack Exposure")
-
-                qb_stack_rows = []
-                for lineup_number, portfolio_lineup in enumerate(portfolio, start=1):
-                    qb_rows = portfolio_lineup[
-                        portfolio_lineup["position"] == "QB"
-                    ]
-                    if qb_rows.empty:
-                        continue
-
-                    qb_row = qb_rows.iloc[0]
-                    qb_team = qb_row["team"]
-
-                    stack_rows = portfolio_lineup[
-                        (portfolio_lineup["team"] == qb_team)
-                        & (portfolio_lineup["position"].isin(["WR", "TE"]))
-                    ][["player", "gpp_score"]].copy()
-
-                    pass_catchers = stack_rows["player"].tolist()
-                    stack_scores = [
-                        f'{row["player"]}: {float(row["gpp_score"]):.1f}'
-                        for _, row in stack_rows.iterrows()
-                    ]
-
-                    qb_stack_rows.append({
-                        "Lineup": lineup_number,
-                        "QB": qb_row["player"],
-                        "Pass Catchers": " + ".join(pass_catchers),
-                        "Stack Partner Scores": " | ".join(stack_scores),
-                    })
-
-                if qb_stack_rows:
-                    st.dataframe(
-                        pd.DataFrame(qb_stack_rows),
-                        width="stretch",
-                        hide_index=True,
+                    st.success(
+                        f"🏁 Saved {portfolio_final_slot} — "
+                        f"{saved_record.get('lineup_id', '')}"
                     )
 
-            if portfolio:
-                st.markdown("### Portfolio Player Exposure")
-                counts = {}
-                for lineup in portfolio:
-                    for _, row in lineup.iterrows():
-                        pid = str(row["dk_id"])
-                        counts.setdefault(pid, {
-                            "Player": row["player"], "Pos": row["position"],
-                            "Team": row["team"], "Lineups": 0
-                        })
-                        counts[pid]["Lineups"] += 1
+                except Exception as exc:
+                    st.error(
+                        f"Could not save NFL Final Lineup: {exc}"
+                    )
 
-                effective_limits = portfolio[0].attrs.get(
-                    "effective_exposure_limits",
-                    {},
+            portfolio_ids.append(
+                set(
+                    portfolio_lineup["dk_id"]
+                    .dropna()
+                    .astype(str)
                 )
-                manual_limits = portfolio[0].attrs.get(
-                    "manual_exposure_limits",
-                    {},
-                )
-                auto_limits = portfolio[0].attrs.get(
-                    "auto_exposure_limits",
-                    {},
-                )
-                auto_core_ids = portfolio[0].attrs.get(
-                    "auto_core_ids",
-                    set(),
+            )
+
+        if len(portfolio_ids) > 1:
+            st.markdown("### Portfolio Overlap")
+
+            overlap_rows = []
+
+            for i in range(len(portfolio_ids)):
+                for j in range(i + 1, len(portfolio_ids)):
+                    overlap_rows.append(
+                        {
+                            "Lineups": f"{i + 1} vs {j + 1}",
+                            "Shared Players": len(
+                                portfolio_ids[i] & portfolio_ids[j]
+                            ),
+                        }
+                    )
+
+            st.dataframe(
+                pd.DataFrame(overlap_rows),
+                width="stretch",
+                hide_index=True,
+            )
+
+        st.markdown("### QB Exposure")
+
+        qb_exposure = {}
+
+        for portfolio_lineup in saved_portfolio:
+            if not isinstance(portfolio_lineup, pd.DataFrame):
+                continue
+
+            qb_rows = portfolio_lineup[
+                portfolio_lineup["position"] == "QB"
+            ]
+
+            if qb_rows.empty:
+                continue
+
+            qb_name = qb_rows.iloc[0]["player"]
+            qb_exposure[qb_name] = qb_exposure.get(qb_name, 0) + 1
+
+        qb_exposure_rows = [
+            {
+                "QB": qb_name,
+                "Lineups": count,
+                "Exposure": f"{count / len(saved_portfolio):.0%}",
+            }
+            for qb_name, count in sorted(
+                qb_exposure.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ]
+
+        if qb_exposure_rows:
+            st.dataframe(
+                pd.DataFrame(qb_exposure_rows),
+                width="stretch",
+                hide_index=True,
+            )
+
+        st.markdown("### QB Stack Exposure")
+
+        qb_stack_rows = []
+
+        for lineup_number, portfolio_lineup in enumerate(
+            saved_portfolio,
+            start=1,
+        ):
+            if not isinstance(portfolio_lineup, pd.DataFrame):
+                continue
+
+            qb_rows = portfolio_lineup[
+                portfolio_lineup["position"] == "QB"
+            ]
+
+            if qb_rows.empty:
+                continue
+
+            qb_row = qb_rows.iloc[0]
+            qb_team = qb_row["team"]
+
+            stack_rows = portfolio_lineup[
+                (portfolio_lineup["team"] == qb_team)
+                & (portfolio_lineup["position"].isin(["WR", "TE"]))
+            ][["player", "gpp_score"]].copy()
+
+            pass_catchers = stack_rows["player"].tolist()
+            stack_scores = [
+                f'{row["player"]}: {float(row["gpp_score"]):.1f}'
+                for _, row in stack_rows.iterrows()
+            ]
+
+            qb_stack_rows.append(
+                {
+                    "Lineup": lineup_number,
+                    "QB": qb_row["player"],
+                    "Pass Catchers": " + ".join(pass_catchers),
+                    "Stack Partner Scores": " | ".join(stack_scores),
+                }
+            )
+
+        if qb_stack_rows:
+            st.dataframe(
+                pd.DataFrame(qb_stack_rows),
+                width="stretch",
+                hide_index=True,
+            )
+
+        st.markdown("### Portfolio Player Exposure")
+
+        counts = {}
+
+        for lineup in saved_portfolio:
+            if not isinstance(lineup, pd.DataFrame):
+                continue
+
+            for _, row in lineup.iterrows():
+                pid = str(row["dk_id"])
+
+                counts.setdefault(
+                    pid,
+                    {
+                        "Player": row["player"],
+                        "Pos": row["position"],
+                        "Team": row["team"],
+                        "Lineups": 0,
+                    },
                 )
 
-                rows = []
-                for pid, info in counts.items():
-                    cap = effective_limits.get(pid, 3)
+                counts[pid]["Lineups"] += 1
 
-                    if pid in manual_limits:
-                        cap_source = "Manual"
-                    elif pid in auto_core_ids:
-                        cap_source = "Auto Core"
-                    elif pid in auto_limits:
-                        cap_source = "Auto"
-                    else:
-                        cap_source = "Default"
+        first_lineup = saved_portfolio[0]
 
-                    rows.append({
-                        **info,
-                        "Exposure": f'{info["Lineups"]/len(portfolio):.0%}',
-                        "Cap": f"{cap/3:.0%}",
-                        "Cap Source": cap_source,
-                    })
+        effective_limits = first_lineup.attrs.get(
+            "effective_exposure_limits",
+            {},
+        )
+        manual_limits = first_lineup.attrs.get(
+            "manual_exposure_limits",
+            {},
+        )
+        auto_limits = first_lineup.attrs.get(
+            "auto_exposure_limits",
+            {},
+        )
+        auto_core_ids = first_lineup.attrs.get(
+            "auto_core_ids",
+            set(),
+        )
 
-                exposure_df = pd.DataFrame(rows).sort_values(
-                    ["Lineups", "Player"], ascending=[False, True]
-                )
-                st.dataframe(exposure_df, width="stretch", hide_index=True)
+        rows = []
+
+        for pid, info in counts.items():
+            cap = effective_limits.get(pid, 3)
+
+            if pid in manual_limits:
+                cap_source = "Manual"
+            elif pid in auto_core_ids:
+                cap_source = "Auto Core"
+            elif pid in auto_limits:
+                cap_source = "Auto"
+            else:
+                cap_source = "Default"
+
+            rows.append(
+                {
+                    **info,
+                    "Exposure": f'{info["Lineups"]/len(saved_portfolio):.0%}',
+                    "Cap": f"{cap/3:.0%}",
+                    "Cap Source": cap_source,
+                }
+            )
+
+        if rows:
+            exposure_df = pd.DataFrame(rows).sort_values(
+                ["Lineups", "Player"],
+                ascending=[False, True],
+            )
+
+            st.dataframe(
+                exposure_df,
+                width="stretch",
+                hide_index=True,
+            )
 
     st.divider()
 
