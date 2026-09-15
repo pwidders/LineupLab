@@ -8,6 +8,7 @@ from nfl.final_lineup_store import (
     find_nfl_final_lineup_by_id,
     nfl_lineup_id_from_names,
 )
+from nfl.contest_history_store import save_nfl_contest_history
 
 
 DEFAULT_ENTRY_NAME = "rentisdue"
@@ -557,21 +558,39 @@ def render_nfl_contest_review():
                 hide_index=True,
             )
 
-            st.button(
-                "💾 Save NFL Contest Result",
-                disabled=True,
-                key=(
-                    f"disabled_nfl_contest_save_"
-                    f"{file_index}_{file.name}"
-                ),
-                help=(
-                    "Saving will be enabled after we validate "
-                    "DraftKings' real 2026 NFL contest export."
-                ),
+            save_ready = (
+                len(lineup_players) == 9
+                and bool(lineup_id)
+                and matched_final is not None
             )
 
-            st.caption(
-                "Contest History saving is intentionally disabled in v0.1. "
-                "The preview above shows exactly what will be stored once the "
-                "Week 1 DraftKings export format is validated."
-            )
+            if st.button(
+                "💾 Save NFL Contest Result",
+                disabled=not save_ready,
+                key=f"nfl_contest_save_{file_index}_{file.name}",
+                help=None if save_ready else (
+                    "Saving requires all 9 roster spots to parse and "
+                    "a matching saved NFL Final Lineup."
+                ),
+            ):
+                try:
+                    inserted, updated = save_nfl_contest_history(history_preview)
+                    if inserted:
+                        st.success(f"Saved {inserted} NFL contest result(s).")
+                    elif updated:
+                        st.success(f"Updated {updated} existing NFL contest result(s).")
+                    else:
+                        st.info("No NFL contest-history changes were needed.")
+                except Exception as exc:
+                    st.error(f"Could not save NFL contest result: {exc}")
+
+            if save_ready:
+                st.caption(
+                    "Ready to save. Re-saving the same DraftKings Entry ID "
+                    "updates the existing record instead of creating a duplicate."
+                )
+            else:
+                st.caption(
+                    "Save is unavailable until all 9 roster spots parse and "
+                    "the entry matches a saved NFL Final Lineup."
+                )
