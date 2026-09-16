@@ -165,12 +165,7 @@ def list_nfl_final_lineups(
 
     response = (
         supabase.table(TABLE_NAME)
-        .select(
-            "id, user_id, slate_date, slate_name, "
-            "lineup_slot, strategy, lineup_id, salary, "
-            "projected_score, optimizer_score, "
-            "created_at, updated_at"
-        )
+        .select("*")
         .eq("user_id", user_id)
         .eq("slate_date", str(slate_date))
         .eq(
@@ -260,5 +255,8 @@ def find_nfl_final_lineup_by_id(
         return None
 
     return response.data[0]
+
+
+
 
 

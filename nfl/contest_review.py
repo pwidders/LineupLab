@@ -6,6 +6,7 @@ import streamlit as st
 
 from nfl.final_lineup_store import (
     find_nfl_final_lineup_by_id,
+    list_nfl_final_lineups,
     nfl_lineup_id_from_names,
 )
 from nfl.contest_history_store import save_nfl_contest_history
@@ -211,16 +212,32 @@ def render_nfl_contest_review():
                 .tolist()
             )
 
-            default_index = 0
+            search_text = st.text_input(
+                "Search entries",
+                value=DEFAULT_ENTRY_NAME,
+                key=f"nfl_contest_search_{file_index}_{file.name}",
+            ).strip().lower()
 
-            for index, name in enumerate(entry_names):
+            filtered_entry_names = [
+                name for name in entry_names
+                if search_text in name.lower()
+            ] if search_text else entry_names
+
+            if not filtered_entry_names:
+                st.warning(
+                    f'No entries matched "{search_text}". Showing all entries.'
+                )
+                filtered_entry_names = entry_names
+
+            default_index = 0
+            for index, name in enumerate(filtered_entry_names):
                 if name.lower() == DEFAULT_ENTRY_NAME:
                     default_index = index
                     break
 
             selected_entry = st.selectbox(
                 "Select your entry",
-                options=entry_names,
+                options=filtered_entry_names,
                 index=default_index,
                 key=(
                     f"nfl_contest_entry_"
@@ -286,9 +303,47 @@ def render_nfl_contest_review():
                         f"matching: {exc}"
                     )
 
-            contest_type = _infer_contest_type(
-                field_size
+            inferred_contest_type = _infer_contest_type(field_size)
+            contest_type_options = [
+                "Double-Up",
+                "GPP",
+                "Single Entry GPP",
+                "Winner-Take-All",
+                "Other",
+            ]
+            contest_type = st.selectbox(
+                "Contest Type",
+                options=contest_type_options,
+                index=contest_type_options.index(inferred_contest_type),
+                key=f"nfl_contest_type_{file_index}_{file.name}_{selected_entry}",
+                help=(
+                    "DraftKings standings exports do not reliably identify "
+                    "contest format, so confirm this before saving."
+                ),
             )
+
+            financial_col1, financial_col2, financial_col3 = st.columns(3)
+            with financial_col1:
+                entry_fee = st.number_input(
+                    "Entry Fee",
+                    min_value=0.0,
+                    value=3.0,
+                    step=1.0,
+                    format="%.2f",
+                    key=f"nfl_entry_fee_{file_index}_{file.name}_{selected_entry}",
+                )
+            with financial_col2:
+                winnings = st.number_input(
+                    "Winnings",
+                    min_value=0.0,
+                    value=0.0,
+                    step=1.0,
+                    format="%.2f",
+                    key=f"nfl_winnings_{file_index}_{file.name}_{selected_entry}",
+                )
+            profit = float(winnings) - float(entry_fee)
+            with financial_col3:
+                st.metric("Profit", f"${profit:,.2f}")
 
             metric1, metric2, metric3, metric4 = st.columns(4)
 
@@ -339,6 +394,56 @@ def render_nfl_contest_review():
             st.caption(
                 f"NFL Lineup ID: {lineup_id or 'Unavailable'}"
             )
+
+            if not matched_final and len(lineup_players) == 9:
+                try:
+                    manual_candidates = list_nfl_final_lineups(
+                        slate_date=slate_date.isoformat(),
+                        slate_name="Main",
+                    )
+                except Exception as exc:
+                    manual_candidates = []
+                    st.warning(
+                        f"Could not load saved NFL Final Lineups: {exc}"
+                    )
+
+                if manual_candidates:
+                    candidate_labels = ["Do not match manually"] + [
+                        (
+                            f"{row.get('lineup_slot', 'Unknown')} — "
+                            f"{row.get('strategy', 'Unknown')} — "
+                            f"{float(row.get('projected_score') or 0):.2f} proj"
+                        )
+                        for row in manual_candidates
+                    ]
+
+                    manual_choice = st.selectbox(
+                        "Manual Final Lineup Match",
+                        options=candidate_labels,
+                        key=(
+                            f"nfl_manual_match_{file_index}_"
+                            f"{file.name}_{selected_entry}"
+                        ),
+                        help=(
+                            "Use this when the DraftKings roster is one of "
+                            "your saved final lineups but the generated IDs "
+                            "do not match."
+                        ),
+                    )
+
+                    if manual_choice != "Do not match manually":
+                        chosen_index = (
+                            candidate_labels.index(manual_choice) - 1
+                        )
+                        matched_final = manual_candidates[chosen_index]
+                        lineup_id = str(
+                            matched_final.get("lineup_id") or lineup_id
+                        )
+                        st.success(
+                            "Manual match selected: "
+                            f"{matched_final.get('lineup_slot', 'Unknown')} — "
+                            f"{matched_final.get('strategy', 'Unknown')}"
+                        )
 
             if matched_final:
                 st.success(
@@ -537,9 +642,9 @@ def render_nfl_contest_review():
                             if matched_final
                             else 0
                         ),
-                        "Entry Fee": 0.0,
-                        "Winnings": 0.0,
-                        "Profit": 0.0,
+                        "Entry Fee": float(entry_fee),
+                        "Winnings": float(winnings),
+                        "Profit": float(profit),
                         "Player Results": player_results,
                     }
                 ]
