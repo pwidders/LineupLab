@@ -1005,9 +1005,15 @@ with tab_build:
             )
 
         with save_col2:
-            build_final_slate = st.text_input(
+            build_final_slate = st.selectbox(
                 "Slate Name",
-                value="Main",
+                options=[
+                    "Main",
+                    "Afternoon",
+                    "Primetime",
+                    "Showdown",
+                    "Other",
+                ],
                 key="build_final_slate",
             )
 
@@ -1404,9 +1410,15 @@ with tab_build:
                 )
 
             with save_p2:
-                portfolio_final_slate = st.text_input(
+                portfolio_final_slate = st.selectbox(
                     "Slate Name",
-                    value="Main",
+                    options=[
+                        "Main",
+                        "Afternoon",
+                        "Primetime",
+                        "Showdown",
+                        "Other",
+                    ],
                     key=f"portfolio_final_slate_{lineup_number}",
                 )
 
@@ -1658,9 +1670,15 @@ with tab_results:
         )
 
     with final_meta_col2:
-        nfl_final_slate_name = st.text_input(
+        nfl_final_slate_name = st.selectbox(
             "Slate Name",
-            value="Main",
+            options=[
+                "Main",
+                "Afternoon",
+                "Primetime",
+                "Showdown",
+                "Other",
+            ],
             key="nfl_final_slate_name",
         )
 

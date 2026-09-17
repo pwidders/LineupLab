@@ -114,11 +114,19 @@ def render_nfl_performance_center():
         recap = recap.dropna(subset=["slate_date"])
 
         if not recap.empty:
+            # NFL DFS week = Tuesday through Monday
             recap["week_start"] = (
                 recap["slate_date"]
-                - pd.to_timedelta(recap["slate_date"].dt.weekday, unit="D")
+                - pd.to_timedelta(
+                    (recap["slate_date"].dt.weekday - 1) % 7,
+                    unit="D",
+                )
             ).dt.normalize()
-            recap["week_end"] = recap["week_start"] + pd.Timedelta(days=6)
+
+            recap["week_end"] = (
+                recap["week_start"]
+                + pd.Timedelta(days=6)
+            )
 
             available_weeks = (
                 recap[["week_start", "week_end"]]
