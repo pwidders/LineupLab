@@ -328,18 +328,16 @@ def render_nfl_contest_review():
                     "Entry Fee",
                     min_value=0.0,
                     value=3.0,
-                    step=1.0,
+                    step=0.01,
                     format="%.2f",
-                    key=f"nfl_entry_fee_{file_index}_{file.name}_{selected_entry}",
                 )
             with financial_col2:
                 winnings = st.number_input(
                     "Winnings",
                     min_value=0.0,
                     value=0.0,
-                    step=1.0,
+                    step=0.01,
                     format="%.2f",
-                    key=f"nfl_winnings_{file_index}_{file.name}_{selected_entry}",
                 )
             profit = float(winnings) - float(entry_fee)
             with financial_col3:
@@ -666,7 +664,6 @@ def render_nfl_contest_review():
             save_ready = (
                 len(lineup_players) == 9
                 and bool(lineup_id)
-                and matched_final is not None
             )
 
             if st.button(
@@ -674,8 +671,7 @@ def render_nfl_contest_review():
                 disabled=not save_ready,
                 key=f"nfl_contest_save_{file_index}_{file.name}",
                 help=None if save_ready else (
-                    "Saving requires all 9 roster spots to parse and "
-                    "a matching saved NFL Final Lineup."
+                    "Saving requires all 9 NFL roster spots to parse."
                 ),
             ):
                 try:
@@ -696,6 +692,5 @@ def render_nfl_contest_review():
                 )
             else:
                 st.caption(
-                    "Save is unavailable until all 9 roster spots parse and "
-                    "the entry matches a saved NFL Final Lineup."
+                    "Save is unavailable until all 9 NFL roster spots parse."
                 )
