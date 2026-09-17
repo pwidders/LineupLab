@@ -833,6 +833,44 @@ with tab_build:
     st.subheader("Lineup Optimizer")
     st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
+    st.markdown("#### Player Exclusions")
+
+    exclusion_options = (
+        players[
+            ["dk_id", "player", "position", "team"]
+        ]
+        .drop_duplicates(subset=["dk_id"])
+        .sort_values(["position", "player"])
+    )
+
+    exclusion_labels = {
+        f'{row["player"]} ({row["position"]}, {row["team"]})': str(row["dk_id"])
+        for _, row in exclusion_options.iterrows()
+    }
+
+    excluded_player_labels = st.multiselect(
+        "Exclude Players",
+        options=list(exclusion_labels.keys()),
+        key="nfl_excluded_players",
+        help=(
+            "Selected players will be removed from the optimizer player pool "
+            "and cannot appear in single or portfolio lineups."
+        ),
+    )
+
+    excluded_player_ids = {
+        exclusion_labels[label]
+        for label in excluded_player_labels
+    }
+
+    optimizer_players = players[
+        ~players["dk_id"].astype(str).isin(excluded_player_ids)
+    ].copy()
+
+    if excluded_player_labels:
+        st.caption(
+            f"🚫 {len(excluded_player_labels)} player(s) excluded from optimization."
+        )
     strategy = st.selectbox(
         "Strategy",
         ["Cash", "Hybrid", "GPP"],
@@ -929,7 +967,7 @@ with tab_build:
         ):
 
             lineup = optimize_lineup(
-                players,
+                optimizer_players,
                 strategy=strategy,
                 min_salary=min_salary,
                 require_qb_stack=require_qb_stack,
@@ -1319,7 +1357,7 @@ with tab_build:
         with st.spinner(f"Building 3-lineup {portfolio_strategy} portfolio..."):
 
             portfolio = optimize_portfolio(
-                players,
+                optimizer_players,
                 num_lineups=3,
                 strategy=portfolio_strategy,
                 min_salary=portfolio_min_salary,
