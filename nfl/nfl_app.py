@@ -68,6 +68,43 @@ from nfl.final_lineup_store import (
     list_nfl_final_lineups,
 )
 
+def get_odds_window_from_players(players):
+    """
+    Derive the Odds API request window from the active DraftKings slate.
+    Uses the dates embedded in the DK game_info column.
+    """
+
+    if players is None or players.empty or "game_info" not in players.columns:
+        return None, None
+
+    game_dates = (
+        players["game_info"]
+        .dropna()
+        .astype(str)
+        .str.extract(r"(\d{2}/\d{2}/\d{4})", expand=False)
+    )
+
+    game_dates = pd.to_datetime(
+        game_dates,
+        format="%m/%d/%Y",
+        errors="coerce",
+    ).dropna()
+
+    if game_dates.empty:
+        return None, None
+
+    first_date = game_dates.min()
+    last_date = game_dates.max()
+
+    commence_time_from = first_date.strftime("%Y-%m-%dT00:00:00Z")
+
+    # Include the full final slate date.
+    commence_time_to = (
+        last_date + pd.Timedelta(days=1)
+    ).strftime("%Y-%m-%dT04:00:00Z")
+
+    return commence_time_from, commence_time_to
+
 st.set_page_config(
     page_title="LineupLab NFL",
     page_icon="🏈",
@@ -435,10 +472,19 @@ with tab_slate:
     if refresh_odds:
         with st.spinner("Refreshing NFL Vegas lines..."):
             try:
+                commence_time_from, commence_time_to = get_odds_window_from_players(
+                    players
+                )
+
+                if not commence_time_from or not commence_time_to:
+                    raise ValueError(
+                        "Could not determine the NFL slate date range from the DraftKings salary file."
+                    )
+
                 fresh_odds = load_nfl_odds(
                     st.secrets["ODDS_API_KEY"],
-                    "2026-09-13T00:00:00Z",
-                    "2026-09-14T04:00:00Z",
+                    commence_time_from,
+                    commence_time_to,
                 )
 
                 fresh_odds = normalize_odds_teams(fresh_odds)
