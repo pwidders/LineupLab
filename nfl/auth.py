@@ -145,29 +145,23 @@ def render_auth_gate():
 
     st.markdown("### 🔐 Sign in to LineupLab")
     st.caption(
-        "Your Final Lineups and future Performance Center history "
-        "will stay separate from other LineupLab users."
+        "LineupLab is a private app. Sign in with an authorized account."
     )
 
-    sign_in_tab, create_tab = st.tabs(
-        ["Sign In", "Create Account"]
-    )
-
-    with sign_in_tab:
-        with st.form("nfl_sign_in_form"):
-            email = st.text_input(
-                "Email",
-                key="nfl_sign_in_email",
-            )
-            password = st.text_input(
-                "Password",
-                type="password",
-                key="nfl_sign_in_password",
-            )
-            submitted = st.form_submit_button(
-                "Sign In",
-                type="primary",
-            )
+    with st.form("nfl_sign_in_form"):
+        email = st.text_input(
+            "Email",
+            key="nfl_sign_in_email",
+        )
+        password = st.text_input(
+            "Password",
+            type="password",
+            key="nfl_sign_in_password",
+        )
+        submitted = st.form_submit_button(
+            "Sign In",
+            type="primary",
+        )
 
         if submitted:
             try:
@@ -190,73 +184,6 @@ def render_auth_gate():
 
             except Exception as exc:
                 st.error(f"Could not sign in: {exc}")
-
-    with create_tab:
-        with st.form("nfl_create_account_form"):
-            new_email = st.text_input(
-                "Email",
-                key="nfl_signup_email",
-            )
-            new_password = st.text_input(
-                "Password",
-                type="password",
-                key="nfl_signup_password",
-                help="Use at least 6 characters.",
-            )
-            confirm_password = st.text_input(
-                "Confirm Password",
-                type="password",
-                key="nfl_signup_confirm_password",
-            )
-            create_submitted = (
-                st.form_submit_button(
-                    "Create Account",
-                    type="primary",
-                )
-            )
-
-        if create_submitted:
-            if len(new_password) < 6:
-                st.error(
-                    "Password must be at least 6 characters."
-                )
-            elif new_password != confirm_password:
-                st.error("Passwords do not match.")
-            else:
-                try:
-                    client = create_client(
-                        st.secrets["SUPABASE_URL"],
-                        _get_public_supabase_key(),
-                    )
-
-                    response = client.auth.sign_up(
-                        {
-                            "email": new_email.strip(),
-                            "password": new_password,
-                        }
-                    )
-
-                    _save_auth_response(response)
-
-                    if getattr(
-                        response,
-                        "session",
-                        None,
-                    ) is not None:
-                        st.rerun()
-                    else:
-                        st.success(
-                            "Account created. Check your email "
-                            "for the Supabase confirmation link, "
-                            "then return here and sign in."
-                        )
-
-                except Exception as exc:
-                    st.error(
-                        f"Could not create account: {exc}"
-                    )
-
-    return False
 
 
 def render_account_controls():
