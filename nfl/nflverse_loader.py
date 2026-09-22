@@ -137,7 +137,9 @@ def get_recent_baselines(seasons):
 
     if team_col is not None:
         latest_team = (
-            stats.sort_values(["player_display_name", "week"])
+            stats.sort_values(
+                ["player_display_name", "season", "week"]
+            )
             .groupby(["player_display_name", "position"], as_index=False)
             .tail(1)[["player_display_name", "position", team_col]]
             .rename(
@@ -166,6 +168,16 @@ def get_recent_dst_baselines(seasons):
     if hasattr(df, "to_pandas"):
         df = df.to_pandas()
 
+    # Exclude preseason/postseason data from DST baselines.
+    if "season_type" in df.columns:
+        df = df[
+            df["season_type"]
+            .fillna("")
+            .astype(str)
+            .str.upper()
+            .eq("REG")
+        ].copy()
+
     stat_columns = [
         "def_sacks",
         "def_interceptions",
@@ -175,7 +187,14 @@ def get_recent_dst_baselines(seasons):
         "def_safeties",
     ]
 
-    df = df.sort_values(["team", "week"])
+    sort_cols = ["team"]
+
+    if "season" in df.columns:
+        sort_cols.append("season")
+
+    sort_cols.append("week")
+
+    df = df.sort_values(sort_cols)
 
     rows = []
 

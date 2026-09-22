@@ -59,9 +59,14 @@ def build_recent_player_baselines(stats):
 
     available = [c for c in stat_columns if c in stats.columns]
 
-    stats = stats.sort_values(
-        ["player_display_name", "week"]
-    )
+    sort_cols = ["player_display_name"]
+
+    if "season" in stats.columns:
+        sort_cols.append("season")
+
+    sort_cols.append("week")
+
+    stats = stats.sort_values(sort_cols)
 
     rows = []
 

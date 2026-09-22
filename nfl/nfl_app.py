@@ -411,7 +411,7 @@ with tab_slate:
                 st.caption(f"🚫 Removed {out_count} player(s) ruled OUT from the active slate.")
 
         with st.spinner("Loading recent NFL player baselines..."):
-            baselines = get_recent_baselines([2025])
+            baselines = get_recent_baselines([2025, 2026])
 
         players = merge_with_baselines(players, baselines)
 
