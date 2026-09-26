@@ -50,7 +50,6 @@ def optimize_lineup(
         raise ValueError("te_flex_penalty must be >= 0.")
 
     df = players.copy().reset_index(drop=True)
-    df = players.copy().reset_index(drop=True)
 
     # Remove players who are not eligible for optimization
     if "optimizer_eligible" in df.columns:
@@ -595,52 +594,17 @@ def optimize_portfolio(
         str(k): int(v) for k, v in (player_exposure_limits or {}).items()
     }
 
-    # Automatic exposure tiers.
-    # Manual limits always override the automatic tier.
-    #
-    # Auto Core: top non-QB 95+ plays -> max 3 lineups
-    # All other players -> max 2 lineups
+    # Automatic exposure control.
+    # In a 3-lineup portfolio, LineupLab automatically caps every player
+    # at 2 lineups (67%). A deliberate manual override may raise a player
+    # to 100% exposure.
     auto_exposure_limits = {}
+    auto_core_ids = set()
 
     if use_auto_exposure_tiers:
-        scored_players = players.copy()
-        scored_players["gpp_score"] = pd.to_numeric(
-            scored_players["gpp_score"],
-            errors="coerce",
-        )
-
-        # Select only the highest-rated 95+ NON-QB players as automatic core plays.
-        # QB exposure is governed separately by max_qb_exposure.
-        core_candidates = (
-            scored_players[
-                scored_players["gpp_score"].notna()
-                & (scored_players["gpp_score"] >= 95)
-                & (scored_players["position"] != "QB")
-            ]
-            .sort_values(
-                ["gpp_score", "gpp_projection"],
-                ascending=[False, False],
-            )
-            .head(max_auto_core_players)
-        )
-
-        auto_core_ids = set(
-            core_candidates["dk_id"].astype(str)
-        )
-
-        for _, row in scored_players.iterrows():
+        for _, row in players.iterrows():
             player_id = str(row["dk_id"])
-            gpp_score = row["gpp_score"]
-
-            if pd.isna(gpp_score):
-                continue
-
-            if player_id in auto_core_ids:
-                cap = 3
-            else:
-                cap = 2
-
-            auto_exposure_limits[player_id] = cap
+            auto_exposure_limits[player_id] = min(2, num_lineups)
 
     effective_exposure_limits = dict(auto_exposure_limits)
     effective_exposure_limits.update(manual_exposure_limits)

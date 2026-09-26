@@ -1104,7 +1104,15 @@ with tab_build:
         with save_col3:
             build_final_slot = st.selectbox(
                 "Final Lineup Slot",
-                ["Lineup 1", "Lineup 2", "Lineup 3", "Cash", "GPP"],
+                [
+                    "Lineup 1",
+                    "Lineup 2",
+                    "Lineup 3",
+                    "Cash",
+                    "GPP 1",
+                    "GPP 2",
+                    "GPP 3",
+                ],
                 key="build_final_slot",
             )
 
@@ -1217,41 +1225,27 @@ with tab_build:
             ),
         )
 
-    st.markdown("#### Automatic Exposure Tiers")
+    st.markdown("#### Automatic Exposure Control")
 
     use_auto_exposure_tiers = st.checkbox(
-        "Use automatic player exposure tiers",
+        "Use automatic player exposure caps",
         value=True,
         key="portfolio_auto_exposure",
         help=(
-            "Automatically manages exposure across the three-lineup portfolio. "
-            "Only designated Auto Core players may appear in all 3 lineups; "
-            "all other players are capped at 2. Manual overrides take priority."
+            "Automatically caps players at 67% exposure across a three-lineup "
+            "portfolio. Use a manual exposure override if you deliberately want "
+            "a player in all three lineups."
         ),
     )
 
     if use_auto_exposure_tiers:
         st.caption(
-            "Balanced auto tiers: only the top non-QB Auto Core plays may reach 100%; "
-            "all other players are capped at 67%. QB exposure is controlled separately. "
-            "Manual overrides supersede these caps."
+            "Balanced portfolio: players are automatically capped at 67% "
+            "(2 of 3 lineups). Manual exposure overrides supersede this cap."
         )
 
-        max_auto_core_players = st.number_input(
-            "Max Auto Core Players",
-            min_value=0,
-            max_value=3,
-            value=2,
-            step=1,
-            key="portfolio_max_auto_core_players",
-            help=(
-                "Maximum number of elite non-QB players LineupLab may designate as "
-                "automatic core plays that are allowed to appear in all three lineups. "
-                "QB exposure is handled separately."
-            ),
-        )
-    else:
-        max_auto_core_players = 0
+    # Retained for compatibility with the current optimizer function signature.
+    max_auto_core_players = 0
 
     st.markdown("#### Player Exposure Overrides")
     st.caption("Optional: 100% = 3 lineups, 67% = 2, 33% = 1, 0% = exclude.")
@@ -1509,7 +1503,15 @@ with tab_build:
             with save_p3:
                 portfolio_final_slot = st.selectbox(
                     "Final Lineup Slot",
-                    ["Lineup 1", "Lineup 2", "Lineup 3", "Cash", "GPP"],
+                    [
+                        "Lineup 1",
+                        "Lineup 2",
+                        "Lineup 3",
+                        "Cash",
+                        "GPP 1",
+                        "GPP 2",
+                        "GPP 3",
+                    ],
                     index=min(lineup_number - 1, 2),
                     key=f"portfolio_final_slot_{lineup_number}",
                 )
@@ -1820,7 +1822,9 @@ with tab_results:
                 "Lineup 2",
                 "Lineup 3",
                 "Cash",
-                "GPP",
+                "GPP 1",
+                "GPP 2",
+                "GPP 3",
             ],
             key="nfl_final_slot",
             help=(

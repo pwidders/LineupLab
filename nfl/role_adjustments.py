@@ -177,7 +177,16 @@ def apply_role_adjustments(players):
         )
 
         if history_strength == "none":
-
+            # No-history RB/WR/TE players are too uncertain to enter the
+            # optimizer automatically. Keep them visible in projections,
+            # but require a future role override before they become eligible.
+            if pos in ("RB", "WR", "TE"):
+                players.at[idx, "optimizer_eligible"] = False
+                players.at[idx, "role_source"] = "unverified skill-position role"
+                players.at[idx, "role_adjustment"] = "no usable NFL workload / role unverified"
+                players.at[idx, "role_prior_weight"] = 0.0
+                continue
+            
             if pos == "QB":
                 player_name = row.get("player")
                 qb_role = QB_ROLE_OVERRIDES.get(player_name)
