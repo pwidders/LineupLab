@@ -68,6 +68,11 @@ from nfl.final_lineup_store import (
     list_nfl_final_lineups,
 )
 
+from nfl.player_exclusion_store import (
+    load_nfl_player_exclusions,
+    save_nfl_player_exclusions,
+)
+
 def get_odds_window_from_players(players):
     """
     Derive the Odds API request window from the active DraftKings slate.
@@ -834,6 +839,27 @@ with tab_build:
     st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
 
     st.markdown("#### Player Exclusions")
+    # Persist exclusions by the active DK slate date.
+    exclusion_slate_dates = (
+        players["game_info"]
+        .dropna()
+        .astype(str)
+        .str.extract(r"(\d{2}/\d{2}/\d{4})", expand=False)
+    )
+
+    exclusion_slate_dates = pd.to_datetime(
+        exclusion_slate_dates,
+        format="%m/%d/%Y",
+        errors="coerce",
+    ).dropna()
+
+    exclusion_slate_date = (
+        exclusion_slate_dates.min().date().isoformat()
+        if not exclusion_slate_dates.empty
+        else None
+    )
+
+    exclusion_slate_name = "Main"
 
     exclusion_options = (
         players[
@@ -848,13 +874,53 @@ with tab_build:
         for _, row in exclusion_options.iterrows()
     }
 
+    exclusion_state_key = (
+        f"{exclusion_slate_date}|{exclusion_slate_name}"
+        if exclusion_slate_date
+        else None
+    )
+
+    loaded_state_key = st.session_state.get(
+        "nfl_exclusions_loaded_slate"
+    )
+
+    # Load saved exclusions once whenever the active slate changes.
+    if (
+        exclusion_state_key
+        and loaded_state_key != exclusion_state_key
+    ):
+        try:
+            saved_excluded_ids = set(
+                load_nfl_player_exclusions(
+                    slate_date=exclusion_slate_date,
+                    slate_name=exclusion_slate_name,
+                )
+            )
+
+            saved_labels = [
+                label
+                for label, player_id in exclusion_labels.items()
+                if player_id in saved_excluded_ids
+            ]
+
+            st.session_state["nfl_excluded_players"] = saved_labels
+            st.session_state["nfl_exclusions_loaded_slate"] = (
+                exclusion_state_key
+            )
+
+        except Exception as exc:
+            st.warning(
+                f"Could not load saved player exclusions: {exc}"
+            )
+
     excluded_player_labels = st.multiselect(
         "Exclude Players",
         options=list(exclusion_labels.keys()),
         key="nfl_excluded_players",
         help=(
             "Selected players will be removed from the optimizer player pool "
-            "and cannot appear in single or portfolio lineups."
+            "and cannot appear in single or portfolio lineups. "
+            "Exclusions are saved for this slate."
         ),
     )
 
@@ -862,6 +928,36 @@ with tab_build:
         exclusion_labels[label]
         for label in excluded_player_labels
     }
+
+    # Save only when the exclusion set actually changes.
+    if exclusion_slate_date:
+        saved_signature_key = (
+            f"nfl_exclusions_signature_{exclusion_state_key}"
+        )
+        current_signature = tuple(
+            sorted(excluded_player_ids)
+        )
+
+        previous_signature = st.session_state.get(
+            saved_signature_key
+        )
+
+        if previous_signature != current_signature:
+            try:
+                save_nfl_player_exclusions(
+                    excluded_player_ids=excluded_player_ids,
+                    slate_date=exclusion_slate_date,
+                    slate_name=exclusion_slate_name,
+                )
+
+                st.session_state[saved_signature_key] = (
+                    current_signature
+                )
+
+            except Exception as exc:
+                st.warning(
+                    f"Could not save player exclusions: {exc}"
+                )
 
     optimizer_players = players[
         ~players["dk_id"].astype(str).isin(excluded_player_ids)

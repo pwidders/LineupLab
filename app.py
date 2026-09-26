@@ -38,7 +38,6 @@ from slate_settings_store import (
     persist_slate_settings,
 )
 
-
 DK_SALARY_CAP = 50000
 
 st.set_page_config(
