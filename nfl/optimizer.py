@@ -248,6 +248,29 @@ def optimize_lineup(
     model += position_sum("TE") <= 2
 
     # --------------------------------
+    # Prevent offense vs opposing DST
+    # --------------------------------
+
+    dst_indices = df[
+        df["position"] == "DST"
+    ].index
+
+    for dst_i in dst_indices:
+        dst_team = df.loc[dst_i, "team"]
+
+        opposing_offense = [
+            i
+            for i in df.index
+            if (
+                df.loc[i, "position"] in ["QB", "RB", "WR", "TE"]
+                and df.loc[i, "opponent"] == dst_team
+            )
+        ]
+
+        for offense_i in opposing_offense:
+            model += x[dst_i] + x[offense_i] <= 1
+
+    # --------------------------------
     # GPP: QB + WR/TE stack
     # --------------------------------
 
