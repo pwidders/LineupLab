@@ -398,8 +398,8 @@ with tab_slate:
     try:
         players = load_dk_salaries(uploaded_file)
 
-        # Remove players who have already been ruled out before any projections,
-        # rankings, stacks, or optimizer logic are built.
+        # Remove unavailable players before any projections, rankings,
+        # stacks, or optimizer logic are built.
         if "status" in players.columns:
             normalized_status = (
                 players["status"]
@@ -408,12 +408,18 @@ with tab_slate:
                 .str.strip()
                 .str.upper()
             )
-            out_mask = normalized_status.isin({"OUT", "O"})
-            out_count = int(out_mask.sum())
-            players = players.loc[~out_mask].copy()
 
-            if out_count:
-                st.caption(f"🚫 Removed {out_count} player(s) ruled OUT from the active slate.")
+            unavailable_statuses = {"OUT", "O", "IR", "D"}
+            unavailable_mask = normalized_status.isin(unavailable_statuses)
+            unavailable_count = int(unavailable_mask.sum())
+
+            players = players.loc[~unavailable_mask].copy()
+
+            if unavailable_count:
+                st.caption(
+                    f"🚫 Removed {unavailable_count} unavailable player(s) "
+                    f"(OUT / IR / Doubtful) from the active slate."
+                )
 
         with st.spinner("Loading recent NFL player baselines..."):
             baselines = get_recent_baselines([2025, 2026])
