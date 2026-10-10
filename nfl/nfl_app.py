@@ -1210,6 +1210,8 @@ with tab_build:
                     "Lineup 1",
                     "Lineup 2",
                     "Lineup 3",
+                    "Lineup 4",
+                    "Lineup 5",
                     "Cash",
                     "GPP 1",
                     "GPP 2",
@@ -1244,13 +1246,13 @@ with tab_build:
 
 
     # -------------------------
-    # 3-Lineup Portfolio Builder
+    # 5-Lineup Portfolio Builder
     # -------------------------
 
-    st.subheader("3-Lineup Portfolio Builder")
+    st.subheader("5-Lineup Portfolio Builder")
     st.markdown('<div class="ll-section-rule"></div>', unsafe_allow_html=True)
     st.caption(
-        "Build three related lineups while controlling overlap, exposure, and stacking."
+        "Build five related lineups while controlling overlap, exposure, and stacking."
     )
 
     portfolio_strategy = st.selectbox(
@@ -1259,7 +1261,7 @@ with tab_build:
         index=1,
         key="portfolio_strategy",
         help=(
-            "Controls how all three portfolio lineups are optimized. Cash emphasizes "
+            "Controls how all five portfolio lineups are optimized. Cash emphasizes "
             "stability, Hybrid balances safety and upside, and GPP emphasizes ceiling "
             "and tournament potential."
         ),
@@ -1267,15 +1269,15 @@ with tab_build:
 
     portfolio_strategy_help = {
         "Cash": (
-            "Three stability-first lineups designed around floor, consistency, "
+            "Five stability-first lineups designed around floor, consistency, "
             "and high-probability scoring."
         ),
         "Hybrid": (
-            "Three balanced lineups designed to pull double duty in both double-ups "
-            "and small-field / 3-max GPPs."
+            "Five balanced lineups designed to pull double duty in both double-ups "
+            "and small-field GPPs."
         ),
         "GPP": (
-            "Three tournament-focused lineups emphasizing ceiling, correlation, "
+            "Five tournament-focused lineups emphasizing ceiling, correlation, "
             "and differentiated upside."
         ),
     }
@@ -1317,13 +1319,13 @@ with tab_build:
         portfolio_max_qb_exposure = st.number_input(
             "Max QB Exposure",
             min_value=1,
-            max_value=3,
-            value=2,
+            max_value=5,
+            value=3,
             step=1,
             key="portfolio_max_qb_exposure",
             help=(
-                "Maximum number of the three portfolio lineups that may use the same "
-                "quarterback. A value of 2 prevents one QB from appearing in all three."
+                "Maximum number of the five portfolio lineups that may use the same "
+                "quarterback. A value of 3 caps a QB at 60% portfolio exposure."
             ),
         )
 
@@ -1334,23 +1336,26 @@ with tab_build:
         value=True,
         key="portfolio_auto_exposure",
         help=(
-            "Automatically caps players at 67% exposure across a three-lineup "
+            "Automatically caps players at 60% exposure across a five-lineup "
             "portfolio. Use a manual exposure override if you deliberately want "
-            "a player in all three lineups."
+            "higher exposure to a player."
         ),
     )
 
     if use_auto_exposure_tiers:
         st.caption(
-            "Balanced portfolio: players are automatically capped at 67% "
-            "(2 of 3 lineups). Manual exposure overrides supersede this cap."
+            "Balanced portfolio: players are automatically capped at 60% "
+            "(3 of 5 lineups). Manual exposure overrides supersede this cap."
         )
 
     # Retained for compatibility with the current optimizer function signature.
     max_auto_core_players = 0
 
     st.markdown("#### Player Exposure Overrides")
-    st.caption("Optional: 100% = 3 lineups, 67% = 2, 33% = 1, 0% = exclude.")
+    st.caption(
+        "Optional: 100% = 5 lineups, 80% = 4, 60% = 3, "
+        "40% = 2, 20% = 1, 0% = exclude."
+    )
 
     exposure_candidates = (
         players[players["position"].isin(["QB", "RB", "WR", "TE", "DST"])]
@@ -1368,17 +1373,28 @@ with tab_build:
         key="portfolio_exposure_players",
         help=(
             "Manually control exposure for specific players. After selecting a player, "
-            "set 100% = 3 lineups, 67% = 2, 33% = 1, or 0% = exclude."
+            "choose 100% = 5 lineups, 80% = 4, 60% = 3, "
+            "40% = 2, 20% = 1, or 0% = exclude."
         ),
     )
     player_exposure_limits = {}
     for label in selected_exposure_players:
         pct = st.selectbox(
-            label, [100, 67, 33, 0], index=1,
+            label,
+            [100, 80, 60, 40, 20, 0],
+            index=2,
             format_func=lambda x: f"{x}%",
             key=f"exposure_{exposure_options[label]}"
         )
-        player_exposure_limits[exposure_options[label]] = {100:3, 67:2, 33:1, 0:0}[pct]
+
+        player_exposure_limits[exposure_options[label]] = {
+            100: 5,
+            80: 4,
+            60: 3,
+            40: 2,
+            20: 1,
+            0: 0,
+        }[pct]
 
     portfolio_qb_stack = st.checkbox(
         "Require QB + WR/TE stack in every portfolio lineup",
@@ -1441,20 +1457,20 @@ with tab_build:
     )
 
     st.markdown(
-        '<div class="ll-ready">Ready to optimize — review the portfolio controls, then build your three-lineup set.</div>',
+        '<div class="ll-ready">Ready to optimize — review the portfolio controls, then build your five-lineup set.</div>',
         unsafe_allow_html=True,
     )
 
     if st.button(
-        "Build 3-Lineup Portfolio",
+        "Build 5-Lineup Portfolio",
         type="primary",
     ):
 
-        with st.spinner(f"Building 3-lineup {portfolio_strategy} portfolio..."):
+        with st.spinner(f"Building 5-lineup {portfolio_strategy} portfolio..."):
 
             portfolio = optimize_portfolio(
                 optimizer_players,
-                num_lineups=3,
+                num_lineups=5,
                 strategy=portfolio_strategy,
                 min_salary=portfolio_min_salary,
                 require_qb_stack=portfolio_qb_stack,
@@ -1609,12 +1625,14 @@ with tab_build:
                         "Lineup 1",
                         "Lineup 2",
                         "Lineup 3",
+                        "Lineup 4",
+                        "Lineup 5",
                         "Cash",
                         "GPP 1",
                         "GPP 2",
                         "GPP 3",
                     ],
-                    index=min(lineup_number - 1, 2),
+                    index=min(lineup_number - 1, 4),
                     key=f"portfolio_final_slot_{lineup_number}",
                 )
 
@@ -1801,7 +1819,7 @@ with tab_build:
         rows = []
 
         for pid, info in counts.items():
-            cap = effective_limits.get(pid, 3)
+            cap = effective_limits.get(pid, len(saved_portfolio))
 
             if pid in manual_limits:
                 cap_source = "Manual"
@@ -1816,7 +1834,7 @@ with tab_build:
                 {
                     **info,
                     "Exposure": f'{info["Lineups"]/len(saved_portfolio):.0%}',
-                    "Cap": f"{cap/3:.0%}",
+                    "Cap": f"{cap/len(saved_portfolio):.0%}",
                     "Cap Source": cap_source,
                 }
             )
@@ -1903,7 +1921,7 @@ with tab_results:
 
     if not available_final_sources:
         st.info(
-            "Build a single lineup or 3-lineup portfolio first. "
+            "Build a single lineup or 5-lineup portfolio first. "
             "The lineup(s) will then appear here for Final Lineup saving."
         )
     else:
@@ -1923,6 +1941,8 @@ with tab_results:
                 "Lineup 1",
                 "Lineup 2",
                 "Lineup 3",
+                "Lineup 4",
+                "Lineup 5",
                 "Cash",
                 "GPP 1",
                 "GPP 2",

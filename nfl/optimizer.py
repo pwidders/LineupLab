@@ -618,16 +618,16 @@ def optimize_portfolio(
     }
 
     # Automatic exposure control.
-    # In a 3-lineup portfolio, LineupLab automatically caps every player
-    # at 2 lineups (67%). A deliberate manual override may raise a player
-    # to 100% exposure.
+    # In a 5-lineup portfolio, LineupLab automatically caps every player
+    # at 3 lineups (60%). A deliberate manual override may raise a player
+    # above the automatic cap.
     auto_exposure_limits = {}
     auto_core_ids = set()
 
     if use_auto_exposure_tiers:
         for _, row in players.iterrows():
             player_id = str(row["dk_id"])
-            auto_exposure_limits[player_id] = min(2, num_lineups)
+            auto_exposure_limits[player_id] = min(3, num_lineups)
 
     effective_exposure_limits = dict(auto_exposure_limits)
     effective_exposure_limits.update(manual_exposure_limits)
