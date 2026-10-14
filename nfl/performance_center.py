@@ -5,6 +5,10 @@ from nfl.contest_history_store import (
     load_nfl_contest_history,
 )
 
+from nfl.performance_report import (
+    build_nfl_algorithm_review_report,
+)
+
 
 def _format_profit(value: float) -> str:
     if value > 0:
@@ -230,4 +234,54 @@ def render_nfl_performance_center():
         use_container_width=True,
         hide_index=True,
     )
+
+        # -----------------------------
+    # NFL Algorithm Review Report
+    # -----------------------------
+
+    st.markdown("#### 📥 Algorithm Review Report")
+
+    st.caption(
+        "Generate an Excel workbook for reviewing LineupLab NFL "
+        "performance, strategy results, player exposure, QB exposure, "
+        "DST exposure, and lineup construction."
+    )
+
+    if st.button(
+        "Generate NFL Algorithm Review Report",
+        key="generate_nfl_algorithm_review_report",
+    ):
+        try:
+            report_bytes = build_nfl_algorithm_review_report(
+                history
+            )
+
+            st.session_state[
+                "nfl_algorithm_review_report"
+            ] = report_bytes
+
+            st.success(
+                "NFL Algorithm Review Report generated."
+            )
+
+        except Exception as exc:
+            st.error(
+                f"Could not generate NFL Algorithm Review Report: {exc}"
+            )
+
+    report_bytes = st.session_state.get(
+        "nfl_algorithm_review_report"
+    )
+
+    if report_bytes:
+        st.download_button(
+            "⬇️ Download NFL Algorithm Review Report",
+            data=report_bytes,
+            file_name="LineupLab_NFL_Algorithm_Review.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            key="download_nfl_algorithm_review_report",
+        )
 
