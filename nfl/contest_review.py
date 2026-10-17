@@ -167,6 +167,25 @@ def render_nfl_contest_review():
                 df,
                 ["Lineup"],
             )
+            player_col = _find_col(
+                df,
+                ["Player"],
+            )
+
+            roster_position_col = _find_col(
+                df,
+                ["Roster Position", "RosterPosition"],
+            )
+
+            ownership_col = _find_col(
+                df,
+                ["%Drafted", "% Drafted", "Drafted"],
+            )
+
+            player_fpts_col = _find_col(
+                df,
+                ["FPTS", "Fantasy Points"],
+            )
 
             required = {
                 "Entry Name": entry_col,
@@ -281,6 +300,70 @@ def render_nfl_contest_review():
                 lineup_text
             )
 
+                        # -----------------------------
+            # DraftKings Player Results
+            # -----------------------------
+
+            dk_player_results = {}
+
+            if (
+                player_col is not None
+                and player_fpts_col is not None
+            ):
+                player_detail_rows = df[
+                    df[player_col].notna()
+                ].copy()
+
+                for _, player_row in player_detail_rows.iterrows():
+                    player_name = str(
+                        player_row.get(player_col, "")
+                    ).strip()
+
+                    if not player_name:
+                        continue
+
+                    ownership = 0.0
+
+                    if ownership_col is not None:
+                        ownership_raw = player_row.get(
+                            ownership_col,
+                            0,
+                        )
+
+                        if isinstance(ownership_raw, str):
+                            ownership_raw = ownership_raw.replace(
+                                "%",
+                                "",
+                            ).strip()
+
+                        ownership = _safe_num(
+                            ownership_raw,
+                            0,
+                        )
+
+                    player_fpts = _safe_num(
+                        player_row.get(player_fpts_col),
+                        0,
+                    )
+
+                    roster_position = ""
+                    if roster_position_col is not None:
+                        roster_position = str(
+                            player_row.get(
+                                roster_position_col,
+                                ""
+                            )
+                        ).strip()
+
+                    dk_player_results[
+                        player_name.lower()
+                    ] = {
+                        "player": player_name,
+                        "roster_position": roster_position,
+                        "fpts": player_fpts,
+                        "ownership": ownership,
+                    }
+            
             lineup_id = (
                 nfl_lineup_id_from_names(lineup_players)
                 if lineup_players
@@ -385,6 +468,47 @@ def render_nfl_contest_review():
             if not parsed_df.empty:
                 st.dataframe(
                     parsed_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            if dk_player_results:
+                st.markdown(
+                    "#### DraftKings Player Results Preview"
+                )
+
+                dk_preview_rows = []
+
+                for player_name in lineup_players:
+                    result = dk_player_results.get(
+                        str(player_name).strip().lower(),
+                        {}
+                    )
+
+                    dk_preview_rows.append(
+                        {
+                            "Player": player_name,
+                            "DK Player Match": result.get(
+                                "player",
+                                "",
+                            ),
+                            "Roster Position": result.get(
+                                "roster_position",
+                                "",
+                            ),
+                            "FPTS": result.get(
+                                "fpts",
+                                0,
+                            ),
+                            "Ownership": result.get(
+                                "ownership",
+                                0,
+                            ),
+                        }
+                    )
+
+                st.dataframe(
+                    pd.DataFrame(dk_preview_rows),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -536,6 +660,14 @@ def render_nfl_contest_review():
                     if not isinstance(saved_player, dict):
                         continue
 
+                    player_name = str(
+                        saved_player.get("player", "")
+                    ).strip()
+
+                    dk_result = dk_player_results.get(
+                        player_name.lower(),
+                        {},
+                    )    
                     player_results.append(
                         {
                             "player": saved_player.get(
@@ -574,9 +706,35 @@ def render_nfl_contest_review():
                                 "gpp_score",
                                 0,
                             ),
-                            "fpts": 0,
-                            "ownership": 0,
+                            "fpts": dk_result.get(
+                                "fpts",
+                                0,
+                            ),
+                            "ownership": dk_result.get(
+                                "ownership",
+                                0,
+                            ),
                         }
+                    )
+
+            matched_result_count = sum(
+                1
+                for result in player_results
+                if result.get("player", "").strip().lower()
+                in dk_player_results
+            )
+
+            if player_results:
+                if matched_result_count == len(player_results):
+                    st.success(
+                        f"Matched DraftKings results for all "
+                        f"{matched_result_count} lineup players."
+                    )
+                else:
+                    st.warning(
+                        f"Matched DraftKings results for "
+                        f"{matched_result_count} of "
+                        f"{len(player_results)} lineup players."
                     )
 
             rank_percentile = (

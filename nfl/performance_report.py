@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 
 
-REPORT_VERSION = "NFL Algorithm Review Report v1.0"
+REPORT_VERSION = "NFL Algorithm Review Report v1.1"
 
 
 def _safe_numeric(df, columns):
@@ -207,6 +207,8 @@ def _explode_player_results(df):
                     "Opponent": player.get("opponent", ""),
                     "Salary": player.get("salary", 0),
                     "Projection": player.get("projection", 0),
+                    "Actual FPTS": player.get("fpts", 0),
+                    "Ownership": player.get("ownership", 0),
                     "Cash Score": player.get("cash_score", 0),
                     "GPP Score": player.get("gpp_score", 0),
                 }
@@ -216,6 +218,209 @@ def _explode_player_results(df):
         return pd.DataFrame()
 
     return pd.DataFrame(rows)
+
+
+
+def _player_results_analysis(player_df):
+    if player_df.empty:
+        return pd.DataFrame()
+
+    work = player_df.copy()
+
+    numeric_cols = [
+        "Lineup Points",
+        "Rank",
+        "Field Size",
+        "Lineup Profit",
+        "Salary",
+        "Projection",
+        "Actual FPTS",
+        "Ownership",
+        "Cash Score",
+        "GPP Score",
+    ]
+
+    for col in numeric_cols:
+        if col in work.columns:
+            work[col] = pd.to_numeric(
+                work[col],
+                errors="coerce",
+            ).fillna(0)
+
+    # Older contest-history records used placeholder zeroes for both
+    # FPTS and ownership. Treat a contest row as post-lock captured
+    # only when at least one player has a non-zero post-lock value.
+    captured_rows = set()
+
+    for contest_row, group in work.groupby("Contest Row"):
+        has_captured_results = (
+            (group["Actual FPTS"] != 0).any()
+            or (group["Ownership"] != 0).any()
+        )
+
+        if has_captured_results:
+            captured_rows.add(contest_row)
+
+    work["Results Captured"] = work["Contest Row"].isin(
+        captured_rows
+    )
+
+    work["Projection Error"] = pd.NA
+    work["Absolute Error"] = pd.NA
+
+    captured_mask = work["Results Captured"]
+
+    work.loc[
+        captured_mask,
+        "Projection Error",
+    ] = (
+        work.loc[captured_mask, "Actual FPTS"]
+        - work.loc[captured_mask, "Projection"]
+    )
+
+    work.loc[
+        captured_mask,
+        "Absolute Error",
+    ] = (
+        work.loc[captured_mask, "Projection Error"]
+        .astype(float)
+        .abs()
+    )
+
+    preferred_cols = [
+        "Slate Date",
+        "Contest Type",
+        "Strategy",
+        "Lineup Slot",
+        "Player",
+        "Slot",
+        "Position",
+        "Team",
+        "Opponent",
+        "Salary",
+        "Projection",
+        "Actual FPTS",
+        "Projection Error",
+        "Absolute Error",
+        "Ownership",
+        "Cash Score",
+        "GPP Score",
+        "Lineup Points",
+        "Rank",
+        "Field Size",
+        "Lineup Profit",
+        "Results Captured",
+        "Contest Row",
+    ]
+
+    return work[
+        [
+            col
+            for col in preferred_cols
+            if col in work.columns
+        ]
+    ]
+
+
+def _projection_accuracy_by_position(player_results):
+    if (
+        player_results.empty
+        or "Results Captured" not in player_results.columns
+    ):
+        return pd.DataFrame()
+
+    work = player_results[
+        player_results["Results Captured"] == True
+    ].copy()
+
+    if work.empty:
+        return pd.DataFrame()
+
+    work["Projection"] = pd.to_numeric(
+        work["Projection"],
+        errors="coerce",
+    )
+    work["Actual FPTS"] = pd.to_numeric(
+        work["Actual FPTS"],
+        errors="coerce",
+    )
+    work["Projection Error"] = pd.to_numeric(
+        work["Projection Error"],
+        errors="coerce",
+    )
+    work["Absolute Error"] = pd.to_numeric(
+        work["Absolute Error"],
+        errors="coerce",
+    )
+
+    result = (
+        work.groupby("Position", dropna=False)
+        .agg(
+            Player_Results=("Player", "size"),
+            Avg_Projection=("Projection", "mean"),
+            Avg_Actual_FPTS=("Actual FPTS", "mean"),
+            Avg_Error=("Projection Error", "mean"),
+            Mean_Absolute_Error=("Absolute Error", "mean"),
+        )
+        .reset_index()
+    )
+
+    return result.sort_values(
+        "Mean_Absolute_Error",
+        ascending=True,
+    )
+
+
+def _biggest_projection_misses(player_results):
+    if (
+        player_results.empty
+        or "Results Captured" not in player_results.columns
+    ):
+        return pd.DataFrame()
+
+    work = player_results[
+        player_results["Results Captured"] == True
+    ].copy()
+
+    if work.empty:
+        return pd.DataFrame()
+
+    work["Absolute Error"] = pd.to_numeric(
+        work["Absolute Error"],
+        errors="coerce",
+    )
+
+    preferred_cols = [
+        "Slate Date",
+        "Player",
+        "Position",
+        "Team",
+        "Opponent",
+        "Projection",
+        "Actual FPTS",
+        "Projection Error",
+        "Absolute Error",
+        "Ownership",
+        "Cash Score",
+        "GPP Score",
+        "Strategy",
+        "Contest Type",
+        "Lineup Points",
+        "Lineup Profit",
+    ]
+
+    result = work[
+        [
+            col
+            for col in preferred_cols
+            if col in work.columns
+        ]
+    ].copy()
+
+    return result.sort_values(
+        "Absolute Error",
+        ascending=False,
+    )
 
 
 def _player_exposure(player_df, total_lineups=None):
@@ -367,6 +572,13 @@ def build_nfl_algorithm_review_report(
     )
 
     player_df = _explode_player_results(history)
+    player_results = _player_results_analysis(player_df)
+    position_accuracy = _projection_accuracy_by_position(
+        player_results
+    )
+    biggest_misses = _biggest_projection_misses(
+        player_results
+    )
 
     tracked_lineups = max(
         player_df["Contest Row"].nunique(),
@@ -408,12 +620,21 @@ def build_nfl_algorithm_review_report(
                 ),
                 "Contest Records": len(history),
                 "Player Result Rows": len(player_df),
+                "Captured Player Result Rows": (
+                    int(player_results["Results Captured"].sum())
+                    if (
+                        not player_results.empty
+                        and "Results Captured" in player_results.columns
+                    )
+                    else 0
+                ),
                 "Notes": (
-                    "Player/QB/DST sheets measure exposure and the "
-                    "performance of lineups containing those players. "
-                    "Individual player FPTS and ownership are not analyzed "
-                    "because those fields are not yet populated reliably "
-                    "in NFL contest history."
+                    "Post-lock player FPTS and ownership are analyzed only "
+                    "for contest rows where DraftKings player results were "
+                    "captured. Older rows with legacy placeholder zeroes are "
+                    "excluded from projection-accuracy calculations, while "
+                    "genuine zero-point performances remain valid when their "
+                    "contest row contains captured post-lock results."
                 ),
             }
         ]
@@ -452,6 +673,24 @@ def build_nfl_algorithm_review_report(
         contest_type.to_excel(
             writer,
             sheet_name="Contest Type Results",
+            index=False,
+        )
+
+        player_results.to_excel(
+            writer,
+            sheet_name="Player Results",
+            index=False,
+        )
+
+        position_accuracy.to_excel(
+            writer,
+            sheet_name="Position Accuracy",
+            index=False,
+        )
+
+        biggest_misses.to_excel(
+            writer,
+            sheet_name="Biggest Misses",
             index=False,
         )
 
