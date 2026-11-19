@@ -1213,9 +1213,16 @@ with tab_build:
                     "Lineup 4",
                     "Lineup 5",
                     "Cash",
+                    "Cash 1",
+                    "Cash 2",
+                    "Cash 3",
+                    "Cash 4",
+                    "Cash 5",
                     "GPP 1",
                     "GPP 2",
                     "GPP 3",
+                    "GPP 4",
+                    "GPP 5",
                 ],
                 key="build_final_slot",
             )
@@ -1396,10 +1403,12 @@ with tab_build:
             0: 0,
         }[pct]
 
+    # Separate widget state per strategy prevents a GPP stacking choice from
+    # silently carrying over when switching to Cash (and vice versa).
     portfolio_qb_stack = st.checkbox(
         "Require QB + WR/TE stack in every portfolio lineup",
-        value=True,
-        key="portfolio_qb_stack",
+        value=(portfolio_strategy != "Cash"),
+        key=f"portfolio_qb_stack_{portfolio_strategy}",
         help=(
             "Requires every portfolio QB to be paired with at least one same-team "
             "WR or TE so the lineup captures correlated passing-game scoring."
@@ -1448,7 +1457,7 @@ with tab_build:
     portfolio_dst_rb = st.checkbox(
         "Pair DST with same-team RB in every portfolio lineup",
         value=(portfolio_strategy == "GPP"),
-        key="portfolio_dst_rb",
+        key=f"portfolio_dst_rb_{portfolio_strategy}",
         help=(
             "Requires each defense to be paired with a running back from the same team. "
             "This targets positive game-script correlation. Defaults on for GPP and "
@@ -1628,9 +1637,16 @@ with tab_build:
                         "Lineup 4",
                         "Lineup 5",
                         "Cash",
+                        "Cash 1",
+                        "Cash 2",
+                        "Cash 3",
+                        "Cash 4",
+                        "Cash 5",
                         "GPP 1",
                         "GPP 2",
                         "GPP 3",
+                        "GPP 4",
+                        "GPP 5",
                     ],
                     index=min(lineup_number - 1, 4),
                     key=f"portfolio_final_slot_{lineup_number}",
@@ -1944,9 +1960,16 @@ with tab_results:
                 "Lineup 4",
                 "Lineup 5",
                 "Cash",
+                "Cash 1",
+                "Cash 2",
+                "Cash 3",
+                "Cash 4",
+                "Cash 5",
                 "GPP 1",
                 "GPP 2",
                 "GPP 3",
+                "GPP 4",
+                "GPP 5",
             ],
             key="nfl_final_slot",
             help=(
