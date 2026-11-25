@@ -1,6 +1,7 @@
 import streamlit as st
 from pathlib import Path
 import sys
+import hashlib
 import pandas as pd
 from io import BytesIO
 
@@ -26,7 +27,7 @@ from nfl.nflverse_loader import (
     get_recent_dst_baselines,
 )
 
-from nfl.role_adjustments import apply_role_adjustments
+from nfl.role_adjustments import apply_role_adjustments, select_qb_starters, add_workload_confidence
 
 from nfl.projections import (
     add_ll_projections,
@@ -427,7 +428,40 @@ with tab_slate:
         players = merge_with_baselines(players, baselines)
 
         # Week 1 / early-season 2026 role-transition layer
-        players = apply_role_adjustments(players)
+        st.subheader("QB Starter Review")
+        st.caption("Automatic selections are estimates from salary and recent workload, not live depth charts. Review before building. Uncertain teams are excluded until approved.")
+        auto_starters = select_qb_starters(players)
+        qb_overrides = {}
+        slate_key = hashlib.sha256(uploaded_file.getvalue()).hexdigest()[:16]
+        with st.expander("Review / override team starters", expanded=True):
+            for team, group in players[players["position"].eq("QB")].groupby("team"):
+                group = group.sort_values("salary", ascending=False)
+                labels = {str(r.dk_id): f"{r.player} (${r.salary:,.0f})" for r in group.itertuples()}
+                auto_id = auto_starters.get(team)
+                auto_label = labels.get(auto_id, "No approved QB — review needed")
+                choice = st.selectbox(
+                    team, ["__auto__", "__none__"] + list(labels),
+                    format_func=lambda v, labels=labels, auto_label=auto_label: (
+                        f"Auto: {auto_label}" if v == "__auto__" else
+                        "Exclude all QBs" if v == "__none__" else labels[v]),
+                    key=f"qb_review_{slate_key}_{team}",
+                )
+                if choice != "__auto__":
+                    qb_overrides[team] = None if choice == "__none__" else choice
+        players = apply_role_adjustments(players, qb_overrides)
+        players = add_workload_confidence(players)
+        with st.expander("Skill-position workload review / Cash approvals"):
+            st.caption("Small or stale samples are restricted in Cash. Approval requires independent role verification and does not remove projection penalties.")
+            review = players.loc[players["manual_role_review"]].copy()
+            labels = {str(r.dk_id): f"{r.player} ({r.team}, {r.position}, ${r.salary:,.0f})" for r in review.itertuples()}
+            approved = st.multiselect("Approve verified roles for Cash", list(labels), format_func=lambda v: labels[v], key=f"skill_review_{slate_key}")
+            st.dataframe(review[["player", "team", "position", "current_season_games", "baseline_games", "workload_confidence", "sample_size_risk"]], hide_index=True, use_container_width=True)
+        players = add_workload_confidence(players, approved)
+        qb_review = players[players["position"].eq("QB") & players["optimizer_eligible"].eq(True)]
+        st.dataframe(qb_review[["team", "player", "salary", "role_source"]], hide_index=True, use_container_width=True)
+        unresolved = sorted(set(auto_starters) - set(qb_review["team"]))
+        if unresolved:
+            st.warning("No approved QB: " + ", ".join(unresolved))
         with st.spinner("Loading recent NFL defense baselines..."):
             dst_baselines = get_recent_dst_baselines([2025])
 
@@ -707,7 +741,7 @@ with tab_projections:
 
     ranking_display = (
         players[
-            players["position"] == ranking_position
+            (players["position"] == ranking_position) & players["optimizer_eligible"].eq(True)
         ][ranking_cols]
         .sort_values(
             "cash_score",

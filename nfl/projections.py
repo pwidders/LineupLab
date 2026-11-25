@@ -68,6 +68,7 @@ def build_recent_player_baselines(stats):
 
     stats = stats.sort_values(sort_cols)
 
+    latest_season = stats["season"].max() if "season" in stats else None
     rows = []
 
     for (player, position), group in stats.groupby(
@@ -78,10 +79,15 @@ def build_recent_player_baselines(stats):
             "position": position,
         }
 
+        current = group[group["season"] == latest_season] if latest_season is not None else group.iloc[0:0]
+        row["current_season_games"] = len(current)
+        row["baseline_games"] = len(group)
+        # Use current-season history alone once it is sufficiently populated.
+        sample = current if len(current) >= 3 else group
         for col in available:
-            row[f"recent_{col}"] = weighted_recent_average(
-                group[col]
-            )
+            recent = weighted_recent_average(sample[col])
+            longer = pd.to_numeric(sample[col], errors="coerce").tail(10).mean()
+            row[f"recent_{col}"] = 0.75 * recent + 0.25 * longer if pd.notna(longer) else recent
 
         rows.append(row)
 
@@ -413,10 +419,10 @@ def project_receiver(row):
         league_catch_rate,
     )
 
-    projected_catch_rate = blend_efficiency(
+    projected_catch_rate = np.clip(blend_efficiency(
         player_catch_rate,
         league_catch_rate,
-    )
+    ), 0, 1)
 
     projected_receptions = targets * projected_catch_rate
 
@@ -442,12 +448,10 @@ def project_receiver(row):
         else receiving_tds
     )
 
-    baseline_td_rate = 0.25 if position == "WR" else 0.20
-
-    projected_receiving_tds = (
-        receiving_tds * 0.65
-        + baseline_td_rate * 0.35
-    )
+    # Conservative per-target priors; provisional until backtested.
+    baseline_td_rate = 0.045 if position == "WR" else 0.04
+    player_td_rate = np.clip(safe_divide(receiving_tds, targets, baseline_td_rate), 0, 1)
+    projected_receiving_tds = max(0, targets) * blend_efficiency(player_td_rate, baseline_td_rate)
 
     # Include occasional rushing production
     rushing_yards = row.get("recent_rushing_yards", 0)
@@ -765,6 +769,13 @@ def add_ll_projections(players):
         axis=1,
     )
 
+    # Shrink uncertain upside toward conservative replacement-role scoring priors.
+    # These are provisional DK-point anchors, not measured league averages.
+    confidence = pd.to_numeric(players.get("workload_confidence", pd.Series(1.0, index=players.index)), errors="coerce").fillna(0).clip(0, 1)
+    anchor = players["position"].map({"RB": 6.0, "WR": 5.0, "TE": 4.0})
+    players["ll_projection_unadjusted"] = players["ll_projection"]
+    players["ll_projection"] = players["ll_projection"] - (1 - confidence) * (players["ll_projection"] - anchor).clip(lower=0).fillna(0)
+
     range_multipliers = players.apply(
         _projection_range_multipliers,
         axis=1,
@@ -784,6 +795,7 @@ def add_ll_projections(players):
     players["ll_floor"] = (
         players["ll_projection"]
         * players["_floor_multiplier"]
+        * (0.4 + 0.6 * confidence)
     )
 
     players["ll_ceiling"] = (
@@ -958,6 +970,7 @@ def add_strategy_projections(players):
     players["cash_projection"] = (
         cash_base
         * cash_value_multiplier
+        * (0.85 + 0.15 * pd.to_numeric(players.get("workload_confidence", pd.Series(1.0, index=players.index)), errors="coerce").fillna(0).clip(0, 1))
     ).round(3)
 
     # ---------------------------------

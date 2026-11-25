@@ -126,7 +126,32 @@ def _history_strength(row, position):
     return "stable"
 
 
-def apply_role_adjustments(players):
+def select_qb_starters(players, overrides=None):
+    """Return team -> approved DK ID (or None). Automatic picks are estimates."""
+    overrides = overrides or {}
+    result = {}
+    qbs = players[players["position"].eq("QB")].copy()
+    if "status" in qbs:
+        qbs = qbs[~qbs["status"].fillna("").astype(str).str.strip().str.upper().isin({"OUT", "O", "IR", "D", "DOUBTFUL"})]
+    for team, group in qbs.groupby("team"):
+        if team in overrides:
+            chosen = overrides[team]
+            result[team] = str(chosen) if chosen is not None and str(chosen) in set(group["dk_id"].astype(str)) else None
+            continue
+        group = group.sort_values("salary", ascending=False)
+        top = group.iloc[0]
+        # Salary is only a role proxy, never a live depth chart.
+        clear_salary = len(group) == 1 or top["salary"] - group.iloc[1]["salary"] >= 500
+        if (clear_salary and _num(top, "current_season_games") >= 3
+                and _num(top, "recent_attempts") >= 20
+                and QB_ROLE_OVERRIDES.get(top["player"]) != "backup"):
+            result[team] = str(top["dk_id"])
+        else:
+            result[team] = None
+    return result
+
+
+def apply_role_adjustments(players, qb_overrides=None):
     """
     Add LineupLab's early-season role-transition layer.
 
@@ -157,7 +182,9 @@ def apply_role_adjustments(players):
     players["role_adjustment"] = "stable"
     players["role_prior_weight"] = 0.15
     players["optimizer_eligible"] = True
-    players["qb_starter_verified"] = True
+    players["qb_starter_verified"] = False
+
+    approved_qbs = select_qb_starters(players, qb_overrides)
 
     for idx, row in players.iterrows():
         pos = row.get("position")
@@ -176,6 +203,17 @@ def apply_role_adjustments(players):
             and historical_team != current_team
         )
 
+        games = _num(row, "current_season_games")
+        games = 0 if pd.isna(games) else int(games)
+        if pos == "QB":
+            if approved_qbs.get(row.get("team")) != str(row.get("dk_id")):
+                players.at[idx, "optimizer_eligible"] = False
+                players.at[idx, "role_source"] = "QB starter protection"
+                players.at[idx, "role_adjustment"] = "not approved team starter"
+                players.at[idx, "role_prior_weight"] = 0.0
+                continue
+            players.at[idx, "qb_starter_verified"] = True
+
         if history_strength == "none":
             # No-history RB/WR/TE players are too uncertain to enter the
             # optimizer automatically. Keep them visible in projections,
@@ -187,30 +225,6 @@ def apply_role_adjustments(players):
                 players.at[idx, "role_prior_weight"] = 0.0
                 continue
             
-            if pos == "QB":
-                player_name = row.get("player")
-                qb_role = QB_ROLE_OVERRIDES.get(player_name)
-
-                # Explicitly identified backup
-                if qb_role == "backup":
-                    players.at[idx, "qb_starter_verified"] = False
-                    players.at[idx, "optimizer_eligible"] = False
-                    players.at[idx, "role_source"] = "QB depth-chart override"
-                    players.at[idx, "role_adjustment"] = "confirmed / expected backup"
-                    players.at[idx, "role_prior_weight"] = 0.0
-                    continue
-
-                # No NFL history and not explicitly confirmed as a starter
-                if qb_role != "starter":
-                    players.at[idx, "qb_starter_verified"] = False
-                    players.at[idx, "optimizer_eligible"] = False
-                    players.at[idx, "role_source"] = "unverified QB role"
-                    players.at[idx, "role_adjustment"] = "starter status unverified"
-                    players.at[idx, "role_prior_weight"] = 0.0
-                    continue
-
-                players.at[idx, "qb_starter_verified"] = True
-
             prior_weight = 1.0
             source = "2026 salary-tier fallback (true no-history / unmatched)"
             adjustment = "no 2025 usable history"
@@ -230,11 +244,18 @@ def apply_role_adjustments(players):
             source = "2025 baseline + light 2026 role prior"
             adjustment = "early-season role regression"
 
+        # Fade salary priors as actual current-season evidence accumulates.
+        if history_strength != "none":
+            prior_weight *= max(0.0, 1.0 - games / 5.0)
+            if games >= 5:
+                source = "current-season workload"
+                adjustment = "salary prior retired"
         players.at[idx, "role_prior_weight"] = prior_weight
         players.at[idx, "role_source"] = source
         players.at[idx, "role_adjustment"] = adjustment
 
         if pos == "QB":
+            players.at[idx, "role_source"] = ("manual QB approval" if row.get("team") in (qb_overrides or {}) else "inferred QB starter")
             players.at[idx, "recent_attempts"] = _blend(
                 _num(row, "recent_attempts"), priors["attempts"], prior_weight
             )
@@ -291,4 +312,25 @@ def apply_role_adjustments(players):
             if pd.isna(_num(row, "recent_rushing_tds")):
                 players.at[idx, "recent_rushing_tds"] = 0.0
 
+    return players
+
+def add_workload_confidence(players, approved_ids=()):
+    """Conservative sample-size policy; approval permits Cash, not a projection boost."""
+    players = players.copy()
+    skill = players["position"].isin(["RB", "WR", "TE"])
+    current = pd.to_numeric(players.get("current_season_games", pd.Series(0, index=players.index)), errors="coerce").fillna(0).clip(lower=0)
+    total = pd.to_numeric(players.get("baseline_games", pd.Series(0, index=players.index)), errors="coerce").fillna(0).clip(lower=0)
+    # Prior-season observations count at one quarter of current-season evidence.
+    evidence = current + 0.25 * (total - current).clip(lower=0)
+    confidence = (evidence / 5).clip(0, 1)
+    players["workload_confidence"] = confidence.where(skill, 1.0).round(3)
+    players["sample_size_risk"] = np.select(
+        [~skill, current.eq(0), evidence.lt(3), evidence.lt(5), current.lt(8)],
+        ["not applicable", "unverified", "high", "moderate", "low"], default="established")
+    review = skill & (current.eq(0) | evidence.lt(3))
+    eligible = players["optimizer_eligible"].eq(True)
+    approved = skill & players["dk_id"].astype(str).isin(set(map(str, approved_ids))) & eligible
+    players["manual_role_review"] = review & eligible & ~approved
+    players["manual_role_approved"] = approved
+    players["cash_eligible"] = eligible & (~review | approved)
     return players

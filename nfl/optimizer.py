@@ -59,6 +59,17 @@ def optimize_lineup(
             .astype(bool)
         ].copy()
 
+    if strategy == "Cash":
+        skill = df["position"].isin(["RB", "WR", "TE"])
+        cash_ok = df.get("cash_eligible", pd.Series(False, index=df.index)).eq(True)
+        df = df.loc[~skill | cash_ok].copy()
+
+    # Fail closed for quarterbacks without team-starter approval.
+    approved = df.get("qb_starter_verified", pd.Series(False, index=df.index)).eq(True)
+    df = df.loc[df["position"].ne("QB") | approved].copy()
+    if df.loc[df["position"].eq("QB"), "team"].duplicated().any():
+        raise ValueError("Multiple approved QBs for one team. Review QB starters.")
+
     # ------------------------------
 
     # --------------------------------
@@ -135,7 +146,7 @@ def optimize_lineup(
             .str.strip()
             .str.upper()
         )
-        df = df.loc[~normalized_status.isin({"OUT", "O"})].copy()
+        df = df.loc[~normalized_status.isin({"OUT", "O", "IR", "D", "DOUBTFUL"})].copy()
 
     df["hybrid_projection"] = (
         df["cash_projection"].fillna(0) * 0.60
