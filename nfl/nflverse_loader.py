@@ -127,6 +127,10 @@ def get_recent_baselines(seasons):
     """
 
     stats = get_dfs_player_stats(seasons)
+    # Keep one weekly observation per player/position, avoiding duplicate rows.
+    keys = ["player_display_name", "position", "season", "week"]
+    if all(k in stats.columns for k in keys):
+        stats = stats.drop_duplicates(subset=keys, keep="last")
     baselines = build_recent_player_baselines(stats)
 
     team_col = None
